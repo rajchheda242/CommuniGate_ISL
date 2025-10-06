@@ -50,30 +50,62 @@ CommuniGate_ISL/
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- **Python 3.11** (Required for Mediapipe compatibility)
 - Webcam/camera device
 - pip (Python package manager)
+- macOS, Windows, or Linux
 
 ### Installation
 
-1. Clone the repository:
+⚠️ **Important:** This project requires Python 3.11 due to Mediapipe compatibility.
+
+#### Quick Setup (macOS):
+```bash
+# Run the automated setup script
+chmod +x setup.sh
+./setup.sh
+```
+
+#### Manual Setup:
+
+1. **Install Python 3.11** (if not already installed):
+```bash
+# macOS (Homebrew)
+brew install python@3.11
+
+# or use pyenv
+brew install pyenv
+pyenv install 3.11.9
+```
+
+2. **Clone and setup the project**:
 ```bash
 git clone <repository-url>
 cd CommuniGate_ISL
 ```
 
-2. Create a virtual environment (recommended):
+3. **Create virtual environment with Python 3.11**:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On macOS/Linux
+# Remove existing .venv if it exists
+rm -rf .venv
+
+# Create new venv
+python3.11 -m venv .venv
+
+# Activate
+source .venv/bin/activate  # macOS/Linux
 # or
-venv\Scripts\activate  # On Windows
+.venv\Scripts\activate  # Windows
 ```
 
-3. Install dependencies:
+4. **Install dependencies**:
 ```bash
+pip install --upgrade pip
 pip install -r requirements.txt
+pip install mediapipe  # Install separately
 ```
+
+📖 **For detailed installation instructions, see [INSTALL.md](INSTALL.md)**
 
 ### Usage
 

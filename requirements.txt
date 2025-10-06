@@ -1,9 +1,9 @@
 # Core Dependencies
 opencv-python>=4.8.0
-# mediapipe>=0.10.0  # Note: Install manually if not available for your Python version
-# For Python 3.13: pip install mediapipe (may require manual build)
+# mediapipe>=0.10.0  # Install separately after setting up Python 3.11
+# Run: pip install mediapipe
 scikit-learn>=1.3.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0  # Pin to 1.x for better compatibility
 pandas>=2.0.0
 
 # UI Framework
