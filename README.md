@@ -1,0 +1,143 @@
+# CommuniGate_ISL
+
+**Indian Sign Language Recognition System** - A desktop MVP application for recognizing fixed ISL phrases using computer vision.
+
+## 📖 Overview
+
+CommuniGate_ISL is an academic project that uses computer vision and machine learning to recognize **4 fixed Indian Sign Language phrases** through webcam input. The application detects hand landmarks using Mediapipe and classifies gestures to output corresponding text with optional text-to-speech.
+
+## 🎯 Recognized Phrases
+
+1. "Hi, my name is Madiha Siddiqui."
+2. "I am a student."
+3. "I enjoy running as a hobby."
+4. "How are you doing today?"
+
+## 🛠 Tech Stack
+
+- **Python 3.10+**
+- **OpenCV** - Webcam input and image processing
+- **Mediapipe** - Hand landmark detection
+- **scikit-learn** - Gesture classification (KNN/SVM)
+- **Streamlit** - User interface
+- **pyttsx3** - Text-to-speech (optional)
+- **PyInstaller** - Desktop application packaging
+
+## 📁 Project Structure
+
+```
+CommuniGate_ISL/
+├── .github/
+│   └── copilot-instructions.md
+├── data/
+│   ├── raw/              # Raw gesture recordings
+│   └── processed/        # Processed landmark data (CSV)
+├── models/
+│   └── saved/            # Trained models
+├── src/
+│   ├── data_collection/  # Scripts for capturing gestures
+│   ├── training/         # Model training scripts
+│   ├── prediction/       # Live prediction logic
+│   └── ui/               # Streamlit interface
+├── tests/                # Unit tests
+├── .gitignore
+├── requirements.txt
+├── ROADMAP.md
+└── README.md
+```
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Python 3.10 or higher
+- Webcam/camera device
+- pip (Python package manager)
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd CommuniGate_ISL
+```
+
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On macOS/Linux
+# or
+venv\Scripts\activate  # On Windows
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### Usage
+
+#### 1. Test Webcam Setup
+```bash
+python src/data_collection/test_camera.py
+```
+
+#### 2. Collect Training Data
+```bash
+python src/data_collection/collect_gestures.py
+```
+
+#### 3. Train the Model
+```bash
+python src/training/train_model.py
+```
+
+#### 4. Run the Application
+```bash
+streamlit run src/ui/app.py
+```
+
+## 📊 Development Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for detailed development phases and timeline.
+
+## 🧪 Testing
+
+Run tests using:
+```bash
+pytest tests/
+```
+
+## 📦 Building Desktop Application
+
+### Windows (.exe)
+```bash
+pyinstaller --onefile --windowed src/ui/app.py
+```
+
+### macOS (.app)
+```bash
+pyinstaller --onefile --windowed --osx-bundle-identifier com.communigate.isl src/ui/app.py
+```
+
+## 🤝 Contributing
+
+This is an academic project. For suggestions or improvements, please open an issue or submit a pull request.
+
+## 📄 License
+
+This project is created for academic purposes.
+
+## 👥 Authors
+
+- Madiha Siddiqui
+
+## 🙏 Acknowledgments
+
+- Mediapipe team for hand landmark detection
+- OpenCV community
+- Streamlit framework
+
+---
+
+**Note**: This is an MVP for demonstration and pitching purposes, not intended for production use.
