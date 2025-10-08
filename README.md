@@ -1,10 +1,10 @@
 # CommuniGate_ISL
 
-**Indian Sign Language Recognition System** - A desktop MVP application for recognizing fixed ISL phrases using computer vision.
+**Indian Sign Language Recognition System** - A desktop MVP application for recognizing fixed ISL phrases using temporal sequence recognition.
 
 ## 📖 Overview
 
-CommuniGate_ISL is an academic project that uses computer vision and machine learning to recognize **4 fixed Indian Sign Language phrases** through webcam input. The application detects hand landmarks using Mediapipe and classifies gestures to output corresponding text with optional text-to-speech.
+CommuniGate_ISL is an academic project that uses **temporal sequence recognition** with LSTM neural networks to recognize **4 fixed Indian Sign Language phrases**. The system processes video sequences to understand multi-word phrases where each word has its own sign performed over time.
 
 ## 🎯 Recognized Phrases
 
@@ -15,32 +15,55 @@ CommuniGate_ISL is an academic project that uses computer vision and machine lea
 
 ## 🛠 Tech Stack
 
-- **Python 3.10+**
-- **OpenCV** - Webcam input and image processing
+- **Python 3.11** (Required for Mediapipe compatibility)
+- **OpenCV** - Video processing and frame extraction
 - **Mediapipe** - Hand landmark detection
-- **scikit-learn** - Gesture classification (KNN/SVM)
+- **TensorFlow/Keras** - LSTM neural network for sequence classification
 - **Streamlit** - User interface
 - **pyttsx3** - Text-to-speech (optional)
 - **PyInstaller** - Desktop application packaging
+
+## 🧠 How It Works
+
+Unlike static gesture recognition, this system uses **temporal sequence analysis**:
+
+1. **Video Input**: 2-3 second video clips of ISL phrases
+2. **Frame Processing**: Extract hand landmarks from each frame (~60 frames)
+3. **Sequence Formation**: Create temporal sequences (60 frames × 126 features)
+4. **LSTM Classification**: Bidirectional LSTM learns temporal patterns
+5. **Phrase Prediction**: Outputs recognized phrase with confidence
+
+This approach properly handles **multi-word phrases** where each word is signed sequentially.
 
 ## 📁 Project Structure
 
 ```
 CommuniGate_ISL/
-├── .github/
-│   └── copilot-instructions.md
 ├── data/
-│   ├── raw/              # Raw gesture recordings
-│   └── processed/        # Processed landmark data (CSV)
+│   ├── videos/           # Raw MP4 video files
+│   │   ├── phrase_0/     # Videos for phrase 0
+│   │   ├── phrase_1/     # Videos for phrase 1
+│   │   ├── phrase_2/     # Videos for phrase 2
+│   │   └── phrase_3/     # Videos for phrase 3
+│   └── sequences/        # Processed landmark sequences
+│       ├── phrase_0/     # .npy files with landmark sequences
+│       ├── phrase_1/
+│       ├── phrase_2/
+│       └── phrase_3/
 ├── models/
-│   └── saved/            # Trained models
+│   └── saved/            # Trained LSTM models
 ├── src/
-│   ├── data_collection/  # Scripts for capturing gestures
-│   ├── training/         # Model training scripts
-│   ├── prediction/       # Live prediction logic
-│   └── ui/               # Streamlit interface
-├── tests/                # Unit tests
-├── .gitignore
+│   ├── data_collection/
+│   │   ├── test_camera.py           # Test webcam
+│   │   ├── test_mediapipe.py        # Test hand detection
+│   │   ├── collect_sequences.py     # Live webcam collection
+│   │   └── process_videos.py        # Process pre-recorded MP4s ⭐ NEW
+│   ├── training/
+│   │   └── train_sequence_model.py  # LSTM training
+│   ├── prediction/
+│   │   └── predictor.py
+│   └── ui/
+│       └── app.py
 ├── requirements.txt
 ├── ROADMAP.md
 └── README.md
@@ -51,24 +74,13 @@ CommuniGate_ISL/
 ### Prerequisites
 
 - **Python 3.11** (Required for Mediapipe compatibility)
-- Webcam/camera device
 - pip (Python package manager)
 - macOS, Windows, or Linux
+- **Pre-recorded MP4 videos** OR webcam for live data collection
 
 ### Installation
 
-⚠️ **Important:** This project requires Python 3.11 due to Mediapipe compatibility.
-
-#### Quick Setup (macOS):
-```bash
-# Run the automated setup script
-chmod +x setup.sh
-./setup.sh
-```
-
-#### Manual Setup:
-
-1. **Install Python 3.11** (if not already installed):
+#### 1. Install Python 3.11
 ```bash
 # macOS (Homebrew)
 brew install python@3.11
@@ -78,18 +90,12 @@ brew install pyenv
 pyenv install 3.11.9
 ```
 
-2. **Clone and setup the project**:
+#### 2. Setup Project
 ```bash
 git clone <repository-url>
 cd CommuniGate_ISL
-```
 
-3. **Create virtual environment with Python 3.11**:
-```bash
-# Remove existing .venv if it exists
-rm -rf .venv
-
-# Create new venv
+# Create virtual environment with Python 3.11
 python3.11 -m venv .venv
 
 # Activate
@@ -98,63 +104,101 @@ source .venv/bin/activate  # macOS/Linux
 .venv\Scripts\activate  # Windows
 ```
 
-4. **Install dependencies**:
+#### 3. Install Dependencies
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
-pip install mediapipe  # Install separately
+pip install mediapipe
 ```
 
-📖 **For detailed installation instructions, see [INSTALL.md](INSTALL.md)**
-
-### Usage
-
-#### 1. Test Webcam Setup
+#### 4. Verify Installation
 ```bash
 python src/data_collection/test_camera.py
+python src/data_collection/test_mediapipe.py
 ```
 
-#### 2. Collect Training Data
+## 📊 Workflow
+
+### Option A: Using Pre-recorded MP4 Videos (Recommended for Multiple Contributors)
+
+**Perfect for your use case with 5 people recording 10 videos each!**
+
+#### 1. Organize Video Files
 ```bash
-python src/data_collection/collect_gestures.py
+# Create directory structure
+mkdir -p data/videos/phrase_{0,1,2,3}
+
+# Place videos in appropriate folders:
+# data/videos/phrase_0/person1_take1.mp4
+# data/videos/phrase_0/person1_take2.mp4
+# ... (10 videos per person, 5 people = 50 videos per phrase)
 ```
 
-#### 3. Train the Model
+#### 2. Process Videos to Extract Sequences
 ```bash
-python src/training/train_model.py
+python src/data_collection/process_videos.py
+```
+This will:
+- Read all MP4 files from `data/videos/`
+- Extract hand landmarks from each frame
+- Save as sequence arrays in `data/sequences/`
+
+#### 3. Train LSTM Model
+```bash
+python src/training/train_sequence_model.py
 ```
 
-#### 4. Run the Application
+#### 4. Run Live Recognition
 ```bash
 streamlit run src/ui/app.py
 ```
 
-## 📊 Development Roadmap
+---
 
-See [ROADMAP.md](ROADMAP.md) for detailed development phases and timeline.
+### Option B: Live Webcam Collection
+
+If you want to collect data directly:
+```bash
+python src/data_collection/collect_sequences.py
+```
+
+---
+
+## 🎥 Video Recording Guidelines
+
+For best results when recording the MP4 videos:
+
+- **Duration**: 2-4 seconds per video
+- **Format**: MP4, MOV, or AVI
+- **Frame Rate**: 30 fps (standard)
+- **Lighting**: Good, even lighting
+- **Background**: Plain background preferred
+- **Camera Position**: Front-facing, waist-up view
+- **Hand Visibility**: Both hands clearly visible
+- **Signing**: Perform all signs in the phrase naturally and sequentially
+
+**Example naming convention:**
+```
+phrase_0/person1_video01.mp4
+phrase_0/person1_video02.mp4
+...
+phrase_0/person5_video10.mp4
+```
+
+## 📖 Documentation
+
+- **ROADMAP.md** - Development phases and timeline
+- **VIDEO_PROCESSING_GUIDE.md** - Detailed guide for processing MP4 files
 
 ## 🧪 Testing
 
-Run tests using:
 ```bash
-pytest tests/
+# Test camera
+python src/data_collection/test_camera.py
+
+# Test mediapipe
+python src/data_collection/test_mediapipe.py
 ```
-
-## 📦 Building Desktop Application
-
-### Windows (.exe)
-```bash
-pyinstaller --onefile --windowed src/ui/app.py
-```
-
-### macOS (.app)
-```bash
-pyinstaller --onefile --windowed --osx-bundle-identifier com.communigate.isl src/ui/app.py
-```
-
-## 🤝 Contributing
-
-This is an academic project. For suggestions or improvements, please open an issue or submit a pull request.
 
 ## 📄 License
 
