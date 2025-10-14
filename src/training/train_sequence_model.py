@@ -18,10 +18,11 @@ import json
 DATA_DIR = "data/sequences"
 MODEL_DIR = "models/saved"
 PHRASES = [
-    "Hi, my name is Madiha Siddiqui.",
-    "I am a student.",
-    "I enjoy running as a hobby.",
-    "How are you doing today?"
+    "Hi my name is Reet",
+    "How are you",
+    "I am from Delhi",
+    "I like coffee",
+    "What do you like"
 ]
 
 

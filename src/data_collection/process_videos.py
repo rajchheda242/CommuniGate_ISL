@@ -15,13 +15,14 @@ from tqdm import tqdm
 # Configuration
 VIDEO_DIR = "data/videos"
 OUTPUT_DIR = "data/sequences"
-TARGET_FRAMES = 60  # Normalize all sequences to 60 frames
+TARGET_FRAMES = 90  # Normalize all sequences to 90 frames (for 3-10 sec videos at 30fps)
 
 PHRASES = [
-    "Hi, my name is Madiha Siddiqui.",
-    "I am a student.",
-    "I enjoy running as a hobby.",
-    "How are you doing today?"
+    "Hi my name is Reet",
+    "How are you",
+    "I am from Delhi",
+    "I like coffee",
+    "What do you like"
 ]
 
 

@@ -8,10 +8,11 @@ CommuniGate_ISL is an academic project that uses **temporal sequence recognition
 
 ## 🎯 Recognized Phrases
 
-1. "Hi, my name is Madiha Siddiqui."
-2. "I am a student."
-3. "I enjoy running as a hobby."
-4. "How are you doing today?"
+1. "Hi my name is Reet"
+2. "How are you"
+3. "I am from Delhi"
+4. "I like coffee"
+5. "What do you like"
 
 ## 🛠 Tech Stack
 

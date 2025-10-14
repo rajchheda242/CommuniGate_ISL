@@ -11,13 +11,14 @@ This guide explains how to process pre-recorded MP4 videos from multiple contrib
 **Setup:**
 - 5 people will record videos
 - Each person performs each phrase 10 times
-- Total: 5 people × 10 recordings × 4 phrases = **200 videos**
+- Total: 5 people × 10 recordings × 5 phrases = **250 videos**
 
 **Data distribution per phrase:**
 - Phrase 0: 50 videos
 - Phrase 1: 50 videos
 - Phrase 2: 50 videos
 - Phrase 3: 50 videos
+- Phrase 4: 50 videos
 
 This is **excellent** for model generalization across different people!
 
@@ -45,7 +46,9 @@ CommuniGate_ISL/
         │   └── (50 videos)
         ├── phrase_2/
         │   └── (50 videos)
-        └── phrase_3/
+        ├── phrase_3/
+        │   └── (50 videos)
+        └── phrase_4/
             └── (50 videos)
 ```
 
@@ -53,7 +56,7 @@ CommuniGate_ISL/
 
 ```bash
 cd CommuniGate_ISL
-mkdir -p data/videos/phrase_{0,1,2,3}
+mkdir -p data/videos/phrase_{0,1,2,3,4}
 ```
 
 ### Naming Convention (Recommended)

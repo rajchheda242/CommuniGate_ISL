@@ -4,14 +4,15 @@ Thank you for helping with the CommuniGate ISL project!
 
 ## 🎯 What You Need to Do
 
-Record **40 short videos** (10 videos for each of the 4 phrases below).
+Record **50 short videos** (10 videos for each of the 5 phrases below).
 
-### The 4 Phrases:
+### The 5 Phrases:
 
-1. **"Hi, my name is Madiha Siddiqui."**
-2. **"I am a student."**
-3. **"I enjoy running as a hobby."**
-4. **"How are you doing today?"**
+1. **"Hi my name is Reet"**
+2. **"How are you"**
+3. **"I am from Delhi"**
+4. **"I like coffee"**
+5. **"What do you like"**
 
 ---
 
@@ -26,6 +27,14 @@ Record **40 short videos** (10 videos for each of the 4 phrases below).
 ✅ **Stable Camera**: Place phone on a stand or stable surface (no handheld)
 
 ### How to Record Each Video
+
+**Duration: 3-10 seconds per video** (longer phrases like "Hi my name is Reet" can extend to 15 seconds)
+
+- Take your time to sign clearly and naturally
+- Don't rush the gestures
+- The system automatically normalizes video lengths
+
+```
 
 1. **Start recording**
 2. **Wait 1 second** (brief pause)
@@ -69,12 +78,12 @@ Record **40 short videos** (10 videos for each of the 4 phrases below).
 ## ✅ Video Quality Checklist
 
 Before moving on, check each video:
-- [ ] Video is 2-4 seconds long
-- [ ] Both hands are visible the entire time
-- [ ] Hands don't go off-screen
+- [ ] Video is 3-10 seconds long (longer phrases can extend to 15s)
+- [ ] Both hands are visible most of the time (>80%)
+- [ ] Hands stay in frame (avoid touching edges)
 - [ ] Lighting is good (hands clearly visible)
 - [ ] No blur or heavy motion artifacts
-- [ ] Complete phrase is performed
+- [ ] Complete phrase is performed naturally (don't rush!)
 - [ ] You can see the hand movements clearly
 
 If ANY of these are NO, please re-record that take!
@@ -138,9 +147,9 @@ Send via USB drive, AirDrop, or preferred method
 
 | Item | Details |
 |------|---------|
-| **Number of phrases** | 4 |
+| **Number of phrases** | 5 |
 | **Videos per phrase** | 10 |
-| **Total videos** | 40 |
+| **Total videos** | 50 |
 | **Duration per video** | 2-4 seconds |
 | **Format** | MP4 (phone default is fine) |
 | **Camera position** | Front-facing, waist-up |
@@ -149,36 +158,36 @@ Send via USB drive, AirDrop, or preferred method
 
 ---
 
-## 🎓 The 4 Phrases (Reference)
+## 🎓 The 5 Phrases (Reference)
 
-### Phrase 1: "Hi, my name is Madiha Siddiqui."
+### Phrase 1: "Hi my name is Reet"
 - Sign: Hi
 - Sign: my
 - Sign: name
 - Sign: is
-- Sign: Madiha
-- Sign: Siddiqui
+- Sign: Reet
 
-### Phrase 2: "I am a student."
-- Sign: I
-- Sign: am
-- Sign: a
-- Sign: student
-
-### Phrase 3: "I enjoy running as a hobby."
-- Sign: I
-- Sign: enjoy
-- Sign: running
-- Sign: as
-- Sign: a
-- Sign: hobby
-
-### Phrase 4: "How are you doing today?"
+### Phrase 2: "How are you"
 - Sign: How
 - Sign: are
 - Sign: you
-- Sign: doing
-- Sign: today
+
+### Phrase 3: "I am from Delhi"
+- Sign: I
+- Sign: am
+- Sign: from
+- Sign: Delhi
+
+### Phrase 4: "I like coffee"
+- Sign: I
+- Sign: like
+- Sign: coffee
+
+### Phrase 5: "What do you like"
+- Sign: What
+- Sign: do
+- Sign: you
+- Sign: like
 
 *(Note: Perform each word's sign in sequence during the 2-4 second video)*
 
@@ -219,7 +228,8 @@ Your contribution is crucial for training the AI model. Quality recordings will 
 - [ ] Recorded 10 videos for Phrase 2
 - [ ] Recorded 10 videos for Phrase 3
 - [ ] Recorded 10 videos for Phrase 4
-- [ ] Total: 40 videos
+- [ ] Recorded 10 videos for Phrase 5
+- [ ] Total: 50 videos
 - [ ] All videos are 2-4 seconds
 - [ ] All videos show both hands clearly
 - [ ] Videos are named clearly

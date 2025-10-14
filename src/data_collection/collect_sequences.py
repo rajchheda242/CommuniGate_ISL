@@ -13,14 +13,15 @@ import time
 
 # Fixed phrases to collect
 PHRASES = [
-    "Hi, my name is Madiha Siddiqui.",
-    "I am a student.",
-    "I enjoy running as a hobby.",
-    "How are you doing today?"
+    "Hi my name is Reet",
+    "How are you",
+    "I am from Delhi",
+    "I like coffee",
+    "What do you like"
 ]
 
 SEQUENCES_PER_PHRASE = 40  # Number of sequence samples per phrase
-SEQUENCE_LENGTH = 60  # Number of frames per sequence (~2 seconds at 30fps)
+SEQUENCE_LENGTH = 90  # Number of frames per sequence (~3 seconds at 30fps, can extend to 10s)
 COUNTDOWN_SECONDS = 3
 
 DATA_DIR = "data/sequences"
