@@ -8,9 +8,11 @@ import os
 import glob
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+# Import Keras via TensorFlow (recommended for TF 2.x)
 import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Bidirectional, Input
+from tensorflow.keras import callbacks
 import joblib
 import json
 
@@ -48,7 +50,7 @@ class SequenceModelTrainer:
                 print(f"Warning: No data found for phrase {phrase_idx}")
                 continue
             
-            sequence_files = glob.glob(os.path.join(phrase_dir, "sequence_*.npy"))
+            sequence_files = glob.glob(os.path.join(phrase_dir, "*_seq.npy"))
             
             for seq_file in sequence_files:
                 sequence = np.load(seq_file)
@@ -90,24 +92,24 @@ class SequenceModelTrainer:
     
     def build_lstm_model(self, sequence_length, n_features, n_classes):
         """Build LSTM model for sequence classification."""
-        model = keras.Sequential([
+        model = Sequential([
             # Input layer
-            layers.Input(shape=(sequence_length, n_features)),
+            Input(shape=(sequence_length, n_features)),
             
             # First LSTM layer (return sequences for next LSTM)
-            layers.Bidirectional(layers.LSTM(64, return_sequences=True)),
-            layers.Dropout(0.3),
+            Bidirectional(LSTM(64, return_sequences=True)),
+            Dropout(0.3),
             
             # Second LSTM layer
-            layers.Bidirectional(layers.LSTM(32)),
-            layers.Dropout(0.3),
+            Bidirectional(LSTM(32)),
+            Dropout(0.3),
             
             # Dense layers
-            layers.Dense(32, activation='relu'),
-            layers.Dropout(0.2),
+            Dense(32, activation='relu'),
+            Dropout(0.2),
             
             # Output layer
-            layers.Dense(n_classes, activation='softmax')
+            Dense(n_classes, activation='softmax')
         ])
         
         model.compile(
@@ -135,14 +137,14 @@ class SequenceModelTrainer:
         self.model.summary()
         
         # Callbacks
-        early_stopping = keras.callbacks.EarlyStopping(
+        early_stopping = callbacks.EarlyStopping(
             monitor='val_loss',
             patience=15,
             restore_best_weights=True,
             verbose=1
         )
         
-        reduce_lr = keras.callbacks.ReduceLROnPlateau(
+        reduce_lr = callbacks.ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
             patience=5,

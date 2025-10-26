@@ -1,6 +1,6 @@
 """
-Streamlit UI for ISL Recognition - Smart User-Controlled Recording.
-Provides a web-based interface with manual recording control for better UX.
+Streamlit UI for ISL Recognition - User Controlled Recording.
+Better UX: User decides when to start/stop recording.
 """
 
 import streamlit as st
@@ -12,9 +12,7 @@ import json
 import os
 from PIL import Image
 import threading
-import time
 from tensorflow.keras.models import load_model
-from datetime import datetime
 
 # Try to import text-to-speech (optional)
 try:
@@ -25,19 +23,9 @@ except ImportError:
 
 
 MODEL_DIR = "models/saved"
-MIN_FRAMES = 60   # Minimum frames needed
-MAX_FRAMES = 150  # Maximum frames to keep
-TARGET_FRAMES = 90  # Model expects 90 frames
-DEBUG = True  # Set to False to silence debug logs
-
-
-def debug_log(msg: str):
-    if DEBUG:
-        try:
-            ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-            print(f"[UI DEBUG {ts}] {msg}")
-        except Exception:
-            pass
+MIN_FRAMES = 60
+MAX_FRAMES = 150
+TARGET_FRAMES = 90
 
 
 class SmartStreamlitApp:
@@ -53,7 +41,7 @@ class SmartStreamlitApp:
         self.phrase_mapping = None
         self.tts_engine = None
         
-        # Recording state - stored in session_state for persistence
+        # Recording state
         if 'is_recording' not in st.session_state:
             st.session_state.is_recording = False
         if 'recorded_frames' not in st.session_state:
@@ -62,12 +50,6 @@ class SmartStreamlitApp:
             st.session_state.last_prediction = None
         if 'last_confidence' not in st.session_state:
             st.session_state.last_confidence = 0.0
-        # Camera state to avoid double-start UX
-        if 'camera_toggle' not in st.session_state:
-            st.session_state.camera_toggle = False
-        # Frame counter (derived from recorded frames but cached for UI)
-        if 'frame_count' not in st.session_state:
-            st.session_state.frame_count = 0
         
         self.load_model()
         if TTS_AVAILABLE:
@@ -81,7 +63,6 @@ class SmartStreamlitApp:
         
         if not os.path.exists(model_path):
             st.error(f"❌ Model not found: {model_path}")
-            st.info("Please train the model first: `python src/training/train_sequence_model.py`")
             return
         
         self.model = load_model(model_path)
@@ -97,7 +78,6 @@ class SmartStreamlitApp:
             self.tts_engine = pyttsx3.init()
             self.tts_engine.setProperty('rate', 150)
         except:
-            st.warning("Text-to-speech initialization failed")
             self.tts_engine = None
     
     def speak(self, text):
@@ -199,8 +179,6 @@ class SmartStreamlitApp:
                 # Limit max frames
                 if len(st.session_state.recorded_frames) > MAX_FRAMES:
                     st.session_state.recorded_frames.pop(0)
-                # Update frame counter in session state for consistent UI
-                st.session_state.frame_count = len(st.session_state.recorded_frames)
         
         return frame, hands_detected
 
@@ -226,15 +204,15 @@ def main():
     # Sidebar
     st.sidebar.header("⚙️ Settings")
     
+    if TTS_AVAILABLE:
+        enable_tts = st.sidebar.checkbox("🔊 Text-to-Speech", value=False)
+    else:
+        st.sidebar.info("💡 Install pyttsx3 for TTS")
+        enable_tts = False
+    
     confidence_threshold = st.sidebar.slider(
         "Confidence Threshold", 
-        0.0, 1.0, 0.5, 0.05,
-        help="Minimum confidence to show prediction"
-    )
-    require_confidence = st.sidebar.toggle(
-        "Require confidence (ask to redo if low)",
-        value=True,
-        help="If enabled, the app will NOT show a phrase when confidence is below the threshold and will ask you to redo your gesture."
+        0.0, 1.0, 0.5, 0.05
     )
     
     st.sidebar.markdown("---")
@@ -245,9 +223,9 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info(f"""
     **How to use:**
-    1. Click "▶️ Start Recording" 
+    1. Click "Start Recording" 
     2. Perform your gesture
-    3. Click "⏹️ Stop Recording"
+    3. Click "Stop Recording"
     4. See the prediction!
     
     **Tips:**
@@ -262,42 +240,31 @@ def main():
     with col2:
         st.subheader("🎬 Recording Controls")
         
-        # Dynamic placeholders for right panel so we can update from the camera loop
-        status_banner_ph = st.empty()
-        frame_counter_ph = st.empty()
-        guidance_ph = st.empty()
-
-        # Initial draw based on current state
+        # Recording status
         if st.session_state.is_recording:
-            status_banner_ph.error("🔴 **RECORDING IN PROGRESS**")
-            frame_counter_ph.metric("Frames Captured", st.session_state.frame_count)
-            if st.session_state.frame_count < MIN_FRAMES:
-                guidance_ph.warning(f"Need {MIN_FRAMES - st.session_state.frame_count} more frames")
+            st.error("🔴 **RECORDING IN PROGRESS**")
+            frame_count = len(st.session_state.recorded_frames)
+            st.metric("Frames Captured", frame_count)
+            
+            if frame_count < MIN_FRAMES:
+                st.warning(f"Need {MIN_FRAMES - frame_count} more frames")
             else:
-                guidance_ph.success("✓ Ready to process!")
+                st.success(f"✓ Ready to process!")
         else:
-            status_banner_ph.info("⚪ Ready to record")
-            frame_counter_ph.empty()
-            guidance_ph.empty()
+            st.info("⚪ Ready to record")
         
         # Control buttons
         col_btn1, col_btn2, col_btn3 = st.columns(3)
         
         with col_btn1:
             if not st.session_state.is_recording:
-                if st.button("▶️ Start", use_container_width=True, type="primary", key="start_btn"):
-                    # Start recording and ensure camera is enabled to avoid double-click confusion
+                if st.button("▶️ Start", use_container_width=True, type="primary"):
                     st.session_state.is_recording = True
-                    st.session_state.camera_toggle = True
                     st.session_state.recorded_frames = []
-                    st.session_state.frame_count = 0
                     st.session_state.last_prediction = None
-                    st.session_state.last_confidence = 0.0
-                    debug_log("Start pressed -> is_recording=True, camera_toggle=True, frame_count reset")
-                    # Immediately rerun to reflect Start state and begin camera loop without needing a second click
                     st.rerun()
             else:
-                if st.button("⏹️ Stop", use_container_width=True, type="secondary", key="stop_btn"):
+                if st.button("⏹️ Stop", use_container_width=True, type="secondary"):
                     st.session_state.is_recording = False
                     
                     # Process the recording
@@ -308,32 +275,29 @@ def main():
                             )
                             st.session_state.last_prediction = phrase
                             st.session_state.last_confidence = conf
-                            debug_log(f"Stop pressed -> processed frames={len(st.session_state.recorded_frames)}, phrase={phrase}, conf={conf:.3f}")
+                            
+                            if enable_tts and conf > confidence_threshold:
+                                app.speak(phrase)
                     else:
                         st.session_state.last_prediction = "Too short"
                         st.session_state.last_confidence = 0.0
-                        debug_log(f"Stop pressed -> too short, frames={len(st.session_state.recorded_frames)}")
-
-                    # After stopping, exit camera loop to refresh the whole UI
-                    # so the Start button is shown immediately for the next take.
-                    st.session_state.camera_toggle = False
-                    debug_log("Stop pressed -> camera_toggle=False, triggering rerun")
+                    
                     st.rerun()
         
         with col_btn2:
-            if st.button("🗑️ Clear", use_container_width=True, key="clear_btn"):
+            if st.button("🗑️ Clear", use_container_width=True):
                 st.session_state.recorded_frames = []
-                st.session_state.frame_count = 0
                 st.session_state.last_prediction = None
                 st.session_state.last_confidence = 0.0
+                st.rerun()
         
         with col_btn3:
-            if st.button("🔄 Reset", use_container_width=True, key="reset_btn"):
+            if st.button("🔄 Reset", use_container_width=True):
                 st.session_state.is_recording = False
                 st.session_state.recorded_frames = []
-                st.session_state.frame_count = 0
                 st.session_state.last_prediction = None
                 st.session_state.last_confidence = 0.0
+                st.rerun()
         
         # Prediction results
         st.markdown("---")
@@ -343,44 +307,15 @@ def main():
             phrase = st.session_state.last_prediction
             conf = st.session_state.last_confidence
             
-            # If confidence requirement is enabled and confidence is low, ask the user to redo
-            if require_confidence and conf > 0 and conf < confidence_threshold:
-                st.warning("Confidence is too low — please redo your gesture.")
-                st.metric("Confidence", f"{conf:.1%}", delta="Low")
-                # Offer a quick retry action
-                if st.button("🔁 Try again", key="retry_btn", use_container_width=True):
-                    st.session_state.recorded_frames = []
-                    st.session_state.frame_count = 0
-                    st.session_state.last_prediction = None
-                    st.session_state.last_confidence = 0.0
-                    st.session_state.is_recording = False
-                    # Also exit camera loop to refresh full UI and show Start again
-                    st.session_state.camera_toggle = False
-                    debug_log("Try again -> cleared state, camera_toggle=False, triggering rerun")
-                    st.rerun()
+            if conf > confidence_threshold:
+                st.success(f"**{phrase}**")
+                st.metric("Confidence", f"{conf:.1%}")
+            elif conf > 0:
+                st.warning(f"**{phrase}**")
+                st.metric("Confidence", f"{conf:.1%}", 
+                         delta="Low confidence")
             else:
-                if conf > confidence_threshold:
-                    st.success(f"**{phrase}**")
-                    st.metric("Confidence", f"{conf:.1%}")
-                    
-                    # Speaker button to hear the prediction
-                    if TTS_AVAILABLE:
-                        if st.button("🔊 Speak", key="speak_btn", use_container_width=True):
-                            app.speak(phrase)
-                    else:
-                        st.caption("💡 Install pyttsx3 for text-to-speech")
-                        
-                elif conf > 0:
-                    # Confidence requirement disabled: still show best guess but mark as low
-                    st.warning(f"**{phrase}**")
-                    st.metric("Confidence", f"{conf:.1%}", 
-                             delta="Low confidence")
-                    
-                    if TTS_AVAILABLE:
-                        if st.button("🔊 Speak", key="speak_low_btn", use_container_width=True):
-                            app.speak(phrase)
-                else:
-                    st.error(phrase)
+                st.error(phrase)
         else:
             st.info("No prediction yet")
     
@@ -391,11 +326,10 @@ def main():
         video_placeholder = st.empty()
         status_placeholder = st.empty()
         
-        # Start camera toggle (auto-enabled when you press Start)
-        run_camera = st.checkbox("📷 Enable Camera", value=st.session_state.get("camera_toggle", False), key="camera_toggle")
+        # Start camera toggle
+        run_camera = st.checkbox("📷 Enable Camera", value=False)
         
         if run_camera:
-            debug_log("Camera loop starting (camera_toggle=True)")
             cap = cv2.VideoCapture(0)
             
             if not cap.isOpened():
@@ -409,7 +343,7 @@ def main():
                 min_tracking_confidence=0.5
             ) as hands:
                 
-                # Process frames continuously
+                # Process frames
                 while run_camera:
                     ret, frame = cap.read()
                     
@@ -424,31 +358,17 @@ def main():
                     rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
                     video_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
                     
-                    # Update right panel (status + counter) in real-time
-                    if st.session_state.is_recording:
-                        status_banner_ph.error("🔴 **RECORDING IN PROGRESS**")
-                        frame_counter_ph.metric("Frames Captured", st.session_state.frame_count)
-                        if st.session_state.frame_count < MIN_FRAMES:
-                            guidance_ph.warning(f"Need {MIN_FRAMES - st.session_state.frame_count} more frames")
-                        else:
-                            guidance_ph.success("✓ Ready to process!")
-                    else:
-                        status_banner_ph.info("⚪ Ready to record")
-                        frame_counter_ph.empty()
-                        guidance_ph.empty()
-                    
-                    # Status message
+                    # Status
                     if hands_detected:
                         status_placeholder.success("✓ Hands detected")
                     else:
                         status_placeholder.warning("⚠️ No hands detected")
                     
-                    # Check if camera should continue (check session state)
-                    if not st.session_state.get('camera_toggle', True):
+                    # Check if we should continue
+                    if not st.session_state.get('run_camera', True):
                         break
             
             cap.release()
-            debug_log("Camera loop stopped (camera released)")
         else:
             st.info("👆 Enable camera to start")
 

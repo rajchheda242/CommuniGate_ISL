@@ -1,6 +1,7 @@
 """
 Process pre-recorded MP4 videos to extract hand landmark sequences.
 Designed for batch processing of videos from multiple people.
+Uses multiprocessing for maximum performance on multi-core systems.
 """
 
 import cv2
@@ -10,6 +11,8 @@ import os
 import glob
 from pathlib import Path
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+import time
 
 
 # Configuration
@@ -24,6 +27,28 @@ PHRASES = [
     "I like coffee",
     "What do you like"
 ]
+
+
+def _process_video_worker(task):
+    """
+    Worker function for parallel video processing.
+    Each worker gets its own Mediapipe instance to avoid conflicts.
+    
+    Args:
+        task: Tuple of (video_path, phrase_idx, save_preview)
+    
+    Returns:
+        Tuple of (video_path, phrase_idx, sequence or None)
+    """
+    video_path, phrase_idx, save_preview = task
+    
+    # Create a new VideoProcessor instance for this worker
+    processor = VideoProcessor()
+    
+    # Process the video (suppress individual print statements in parallel mode)
+    sequence = processor.process_video(video_path, save_preview=save_preview)
+    
+    return (video_path, phrase_idx, sequence)
 
 
 class VideoProcessor:
@@ -45,13 +70,14 @@ class VideoProcessor:
             landmarks.extend([landmark.x, landmark.y, landmark.z])
         return landmarks
     
-    def process_video(self, video_path, save_preview=False):
+    def process_video(self, video_path, save_preview=False, verbose=False):
         """
         Process a single video file to extract landmark sequence.
         
         Args:
             video_path: Path to the video file
             save_preview: If True, saves a preview video with landmarks drawn
+            verbose: If True, prints processing details
             
         Returns:
             numpy array of shape (TARGET_FRAMES, 126) or None if processing failed
@@ -59,14 +85,16 @@ class VideoProcessor:
         cap = cv2.VideoCapture(video_path)
         
         if not cap.isOpened():
-            print(f"Error: Could not open video {video_path}")
+            if verbose:
+                print(f"Error: Could not open video {video_path}")
             return None
         
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        print(f"\nProcessing: {Path(video_path).name}")
-        print(f"  FPS: {fps:.1f} | Total frames: {total_frames}")
+        if verbose:
+            print(f"\nProcessing: {Path(video_path).name}")
+            print(f"  FPS: {fps:.1f} | Total frames: {total_frames}")
         
         sequence_frames = []
         frame_count = 0
@@ -132,25 +160,31 @@ class VideoProcessor:
         cap.release()
         if preview_writer:
             preview_writer.release()
-            print(f"  Preview saved: {preview_path}")
+            if verbose:
+                print(f"  Preview saved: {preview_path}")
         
         # Check if we got useful data
         hand_detection_rate = frames_with_hands / max(frame_count, 1)
-        print(f"  Frames processed: {frame_count}")
-        print(f"  Hand detection rate: {hand_detection_rate:.1%}")
+        
+        if verbose:
+            print(f"  Frames processed: {frame_count}")
+            print(f"  Hand detection rate: {hand_detection_rate:.1%}")
         
         if hand_detection_rate < 0.3:
-            print(f"  ⚠️  WARNING: Low hand detection rate! Check video quality.")
+            if verbose:
+                print(f"  ⚠️  WARNING: Low hand detection rate! Check video quality.")
         
         if frame_count == 0:
-            print(f"  ❌ ERROR: No frames extracted!")
+            if verbose:
+                print(f"  ❌ ERROR: No frames extracted!")
             return None
         
         # Normalize sequence length
         sequence = np.array(sequence_frames)
         normalized_sequence = self.normalize_sequence_length(sequence, TARGET_FRAMES)
         
-        print(f"  ✓ Sequence shape: {normalized_sequence.shape}")
+        if verbose:
+            print(f"  ✓ Sequence shape: {normalized_sequence.shape}")
         
         return normalized_sequence
     
@@ -179,9 +213,13 @@ class VideoProcessor:
         
         return normalized
     
-    def process_all_videos(self, save_previews=False):
+    def process_all_videos(self, save_previews=False, num_workers=None):
         """
-        Process all videos in the VIDEO_DIR directory structure.
+        Process all videos in the VIDEO_DIR directory structure using multiprocessing.
+        
+        Args:
+            save_previews: If True, saves preview videos with landmarks
+            num_workers: Number of parallel workers (default: CPU count - 1)
         
         Expected structure:
         data/videos/
@@ -192,13 +230,21 @@ class VideoProcessor:
                 video1.mp4
                 ...
         """
+        if num_workers is None:
+            num_workers = max(1, cpu_count() - 1)  # Leave one core free
+        
         print("="*70)
-        print("VIDEO PROCESSING - Extract Landmark Sequences from MP4 Files")
+        print("VIDEO PROCESSING - Extract Landmark Sequences from Videos")
+        print("="*70)
+        print(f"🚀 Using {num_workers} parallel workers (CPU cores: {cpu_count()})")
         print("="*70)
         
+        start_time = time.time()
         total_processed = 0
         total_failed = 0
         
+        # Collect all video files with their phrase indices
+        all_tasks = []
         for phrase_idx in range(len(PHRASES)):
             phrase_dir = os.path.join(VIDEO_DIR, f"phrase_{phrase_idx}")
             
@@ -217,42 +263,53 @@ class VideoProcessor:
                 print(f"\n⚠️  No video files found in {phrase_dir}")
                 continue
             
-            print(f"\n{'='*70}")
-            print(f"Phrase {phrase_idx}: '{PHRASES[phrase_idx]}'")
-            print(f"Found {len(video_files)} video(s)")
-            print(f"{'='*70}")
+            print(f"\nPhrase {phrase_idx}: '{PHRASES[phrase_idx]}' - {len(video_files)} video(s)")
             
-            phrase_processed = 0
-            phrase_failed = 0
-            
-            for video_idx, video_path in enumerate(tqdm(video_files, desc=f"Phrase {phrase_idx}")):
-                sequence = self.process_video(video_path, save_preview=save_previews)
-                
-                if sequence is not None:
-                    # Save sequence
-                    video_name = Path(video_path).stem
-                    output_path = os.path.join(
-                        OUTPUT_DIR,
-                        f"phrase_{phrase_idx}",
-                        f"{video_name}_seq.npy"
-                    )
-                    np.save(output_path, sequence)
-                    phrase_processed += 1
-                    total_processed += 1
-                else:
-                    phrase_failed += 1
-                    total_failed += 1
-            
-            print(f"\nPhrase {phrase_idx} Summary:")
-            print(f"  ✓ Successfully processed: {phrase_processed}")
-            print(f"  ✗ Failed: {phrase_failed}")
+            # Add to task list
+            for video_path in video_files:
+                all_tasks.append((video_path, phrase_idx, save_previews))
+        
+        if not all_tasks:
+            print("\n❌ No video files found to process!")
+            return
+        
+        print(f"\n{'='*70}")
+        print(f"Total videos to process: {len(all_tasks)}")
+        print(f"{'='*70}\n")
+        
+        # Process videos in parallel
+        with Pool(processes=num_workers) as pool:
+            results = list(tqdm(
+                pool.imap(_process_video_worker, all_tasks),
+                total=len(all_tasks),
+                desc="Processing videos",
+                unit="video"
+            ))
+        
+        # Save results and count successes
+        for video_path, phrase_idx, sequence in results:
+            if sequence is not None:
+                # Save sequence
+                video_name = Path(video_path).stem
+                output_path = os.path.join(
+                    OUTPUT_DIR,
+                    f"phrase_{phrase_idx}",
+                    f"{video_name}_seq.npy"
+                )
+                np.save(output_path, sequence)
+                total_processed += 1
+            else:
+                total_failed += 1
+        
+        elapsed_time = time.time() - start_time
         
         # Final summary
         print(f"\n{'='*70}")
         print("PROCESSING COMPLETE")
         print(f"{'='*70}")
-        print(f"Total videos processed: {total_processed}")
+        print(f"Total videos processed: {total_processed}/{len(all_tasks)}")
         print(f"Total failed: {total_failed}")
+        print(f"Processing time: {elapsed_time:.1f} seconds ({elapsed_time/len(all_tasks):.2f}s per video)")
         print(f"\nSequences saved to: {OUTPUT_DIR}/")
         
         if total_processed > 0:
