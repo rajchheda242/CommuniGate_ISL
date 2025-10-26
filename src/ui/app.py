@@ -207,6 +207,18 @@ class SmartStreamlitApp:
 
 def main():
     """Main Streamlit application."""
+    # Expiry gate: block usage after the specified date/time (local time)
+    # Expiry time: 28 Oct 2025, 3:00 PM (local machine time)
+    EXPIRY_AT = datetime(2025, 10, 28, 15, 0, 0)
+
+    now_local = datetime.now()
+    if now_local >= EXPIRY_AT:
+        st.error(
+            "This app has expired and is no longer available.\n\n"
+            "Expiry: 28 Oct 2025, 3:00 PM"
+        )
+        st.stop()
+
     st.set_page_config(
         page_title="CommuniGate ISL",
         page_icon="🤟",

@@ -7,7 +7,9 @@ numpy>=1.24.0,<2.0.0  # Pin to 1.x for better compatibility
 pandas>=2.0.0
 
 # Deep Learning (for sequence recognition)
-tensorflow>=2.15.0
+# Pin TensorFlow to 2.15.x to avoid protobuf >=5 conflict with mediapipe
+tensorflow==2.15.0
+ml-dtypes>=0.2.0,<0.3.0
 
 # UI Framework
 streamlit>=1.28.0
