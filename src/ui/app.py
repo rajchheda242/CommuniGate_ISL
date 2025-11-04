@@ -174,7 +174,8 @@ class SmartStreamlitApp:
     
     def process_frame(self, frame, hands):
         """Process a single frame."""
-        frame = cv2.flip(frame, 1)
+        # IMPORTANT: Do NOT flip before landmark extraction.
+        # Process original frame to keep coordinates consistent with training.
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(rgb_frame)
         
@@ -190,7 +191,7 @@ class SmartStreamlitApp:
                     self.mp_drawing_styles.get_default_hand_landmarks_style(),
                     self.mp_drawing_styles.get_default_hand_connections_style()
                 )
-        
+
         # Record if recording is active and hands detected
         if st.session_state.is_recording and hands_detected:
             frame_landmarks = self.process_frame_landmarks(results)
@@ -202,7 +203,9 @@ class SmartStreamlitApp:
                 # Update frame counter in session state for consistent UI
                 st.session_state.frame_count = len(st.session_state.recorded_frames)
         
-        return frame, hands_detected
+        # Flip only for display so the UI feels natural
+        display_frame = cv2.flip(frame, 1)
+        return display_frame, hands_detected
 
 
 def main():

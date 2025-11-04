@@ -15,6 +15,7 @@ from tensorflow.keras.models import load_model
 
 MODEL_DIR = "models/saved"
 SEQUENCE_LENGTH = 90  # Number of frames to collect (must match training data)
+MIN_CONFIDENCE = 0.75  # Minimum confidence required to accept a prediction
 
 
 class SequencePredictor:
@@ -144,7 +145,8 @@ class SequencePredictor:
                 if not ret:
                     break
                 
-                frame = cv2.flip(frame, 1)
+                # IMPORTANT: Do NOT flip before landmark extraction to avoid
+                # mirror-domain shift vs training. Process original frame.
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = hands.process(rgb_frame)
                 
@@ -166,18 +168,30 @@ class SequencePredictor:
                 
                 # Predict when buffer is full
                 if len(self.sequence_buffer) == SEQUENCE_LENGTH:
-                    current_phrase, confidence = self.predict_sequence()
-                    if current_phrase is None:
+                    pred_phrase, pred_conf = self.predict_sequence()
+                    if pred_phrase is None:
                         current_phrase = "Processing..."
+                        confidence = 0.0
+                    else:
+                        # Apply confidence gate to reduce false positives
+                        if pred_conf >= MIN_CONFIDENCE:
+                            current_phrase = pred_phrase
+                            confidence = pred_conf
+                        else:
+                            current_phrase = "Low confidence — try again"
+                            confidence = pred_conf
                 
+                # After processing and drawing, flip for user-friendly display only
+                display_frame = cv2.flip(frame, 1)
+
                 # Display UI
                 # Background for text
-                cv2.rectangle(frame, (10, 10), (frame.shape[1] - 10, 180), (0, 0, 0), -1)
+                cv2.rectangle(display_frame, (10, 10), (display_frame.shape[1] - 10, 180), (0, 0, 0), -1)
                 
                 # Buffer status
                 buffer_status = f'Frames: {len(self.sequence_buffer)}/{SEQUENCE_LENGTH}'
                 cv2.putText(
-                    frame, 
+                    display_frame, 
                     buffer_status,
                     (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 
@@ -187,9 +201,10 @@ class SequencePredictor:
                 )
                 
                 # Predicted phrase
+                phrase_text = f'Phrase: {current_phrase}'
                 cv2.putText(
-                    frame, 
-                    f'Phrase: {current_phrase}', 
+                    display_frame, 
+                    phrase_text, 
                     (20, 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     0.8, 
@@ -199,10 +214,13 @@ class SequencePredictor:
                 
                 # Confidence
                 if confidence > 0:
-                    color = (0, 255, 0) if confidence > 0.7 else (0, 255, 255)
+                    # Gate low-confidence predictions to reduce false positives
+                    accept = confidence >= MIN_CONFIDENCE
+                    color = (0, 255, 0) if accept else (0, 255, 255)
+                    conf_text = f'Confidence: {confidence:.1%}' + (" (low)" if not accept else "")
                     cv2.putText(
-                        frame, 
-                        f'Confidence: {confidence:.1%}', 
+                        display_frame, 
+                        conf_text, 
                         (20, 120),
                         cv2.FONT_HERSHEY_SIMPLEX, 
                         0.7, 
@@ -212,7 +230,7 @@ class SequencePredictor:
                 
                 # Instructions
                 cv2.putText(
-                    frame, 
+                    display_frame, 
                     'Press Q=Quit | C=Clear buffer', 
                     (20, 160),
                     cv2.FONT_HERSHEY_SIMPLEX, 
@@ -221,7 +239,7 @@ class SequencePredictor:
                     1
                 )
                 
-                cv2.imshow('ISL Sequence Recognition', frame)
+                cv2.imshow('ISL Sequence Recognition', display_frame)
                 
                 # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
