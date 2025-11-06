@@ -1,0 +1,57 @@
+{
+  "timestamp": "20251106_125737",
+  "expected_phrase": "Hi my name is Reet",
+  "predictions": [
+    {
+      "time": 8.057162046432495,
+      "predicted_phrase": "How are you",
+      "confidence": 0.7982491850852966,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 8.194101095199585,
+      "predicted_phrase": "How are you",
+      "confidence": 0.793809175491333,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 8.33463978767395,
+      "predicted_phrase": "How are you",
+      "confidence": 0.7990530729293823,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 8.494210004806519,
+      "predicted_phrase": "How are you",
+      "confidence": 0.7935827970504761,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 8.6197669506073,
+      "predicted_phrase": "How are you",
+      "confidence": 0.7928653359413147,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 8.755077123641968,
+      "predicted_phrase": "How are you",
+      "confidence": 0.7987425327301025,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 8.888524055480957,
+      "predicted_phrase": "How are you",
+      "confidence": 0.8051630854606628,
+      "expected_phrase": "Hi my name is Reet"
+    },
+    {
+      "time": 10.091778993606567,
+      "predicted_phrase": "How are you",
+      "confidence": 0.8038861155509949,
+      "expected_phrase": "Hi my name is Reet"
+    }
+  ],
+  "accuracy": 0.0,
+  "total_predictions": 8,
+  "correct_predictions": 0
+}

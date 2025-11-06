@@ -1,0 +1,31 @@
+{
+  "training_date": "2025-11-06T11:16:12.373277",
+  "model_type": "TemporalTransformer",
+  "sequence_length": 60,
+  "feature_dim": 1662,
+  "num_classes": 5,
+  "phrases": [
+    "Hi my name is Reet",
+    "How are you",
+    "I am from Delhi",
+    "I like coffee",
+    "What do you like"
+  ],
+  "hyperparameters": {
+    "batch_size": 4,
+    "learning_rate": 0.0001,
+    "epochs": 31,
+    "dropout": 0.1,
+    "num_heads": 4,
+    "num_layers": 3,
+    "d_model": 256,
+    "dff": 1024
+  },
+  "final_metrics": {
+    "train_loss": 0.39295780658721924,
+    "val_loss": 0.7480833381414413,
+    "train_accuracy": 100.0,
+    "val_accuracy": 85.71428571428571
+  },
+  "note": "Configuration corrected: actual training used 60-frame sequences"
+}

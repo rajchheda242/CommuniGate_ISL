@@ -1,11 +1,11 @@
 """
 Streamlit UI for ISL Recognition - Smart User-Controlled Recording.
 Provides a web-based interface with manual recording control for better UX.
+Updated to use SimpleHandExtractor for proper 126-feature preprocessing.
 """
 
 import streamlit as st
 import cv2
-import mediapipe as mp
 import numpy as np
 import joblib
 import json
@@ -13,8 +13,10 @@ import os
 from PIL import Image
 import threading
 import time
+import sys
 from tensorflow.keras.models import load_model
 from datetime import datetime
+import mediapipe as mp
 
 # Try to import text-to-speech (optional)
 try:
@@ -25,9 +27,10 @@ except ImportError:
 
 
 MODEL_DIR = "models/saved"
-MIN_FRAMES = 60   # Minimum frames needed
+MIN_FRAMES = 60   # Minimum frames needed (updated to match retrained model)
 MAX_FRAMES = 150  # Maximum frames to keep
-TARGET_FRAMES = 90  # Model expects 90 frames
+TARGET_FRAMES = 60  # Model expects 60 frames (updated)
+FEATURES_PER_FRAME = 126  # Updated to match original hand-only extraction
 DEBUG = True  # Set to False to silence debug logs
 
 
@@ -40,13 +43,60 @@ def debug_log(msg: str):
             pass
 
 
-class SmartStreamlitApp:
-    """Streamlit application with user-controlled recording."""
+class SimpleHandExtractor:
+    """Simple hand landmark extractor for 126 features (original format)"""
     
     def __init__(self):
         self.mp_hands = mp.solutions.hands
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+    
+    def extract_landmarks(self, hand_landmarks):
+        """Extract landmark coordinates from Mediapipe results."""
+        landmarks = []
+        for landmark in hand_landmarks.landmark:
+            landmarks.extend([landmark.x, landmark.y, landmark.z])
+        return landmarks
+    
+    def process_frame(self, frame):
+        """Process a frame and extract 126 hand features"""
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_frame)
+        
+        # Extract landmarks
+        frame_landmarks = []
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                # Draw landmarks for visual feedback
+                self.mp_drawing.draw_landmarks(
+                    frame,
+                    hand_landmarks,
+                    self.mp_hands.HAND_CONNECTIONS,
+                    self.mp_drawing_styles.get_default_hand_landmarks_style(),
+                    self.mp_drawing_styles.get_default_hand_connections_style()
+                )
+                frame_landmarks.extend(self.extract_landmarks(hand_landmarks))
+        
+        # Pad or truncate to fixed size (2 hands * 21 landmarks * 3 coords = 126)
+        while len(frame_landmarks) < 126:
+            frame_landmarks.append(0.0)
+        frame_landmarks = frame_landmarks[:126]
+        
+        return np.array(frame_landmarks)
+
+
+class SmartStreamlitApp:
+    """Streamlit application with user-controlled recording using SimpleHandExtractor."""
+    
+    def __init__(self):
+        # Initialize SimpleHandExtractor for proper preprocessing
+        self.inference = SimpleHandExtractor()
         
         self.model = None
         self.scaler = None
@@ -89,7 +139,8 @@ class SmartStreamlitApp:
         
         with open(mapping_path, 'r') as f:
             mapping_data = json.load(f)
-            self.phrase_mapping = {int(k): v for k, v in mapping_data.items()}
+            # Handle new format: {phrase: index} -> {index: phrase}
+            self.phrase_mapping = {v: k for k, v in mapping_data.items()}
     
     def init_tts(self):
         """Initialize text-to-speech engine."""
@@ -111,26 +162,15 @@ class SmartStreamlitApp:
                     pass
             threading.Thread(target=_speak, daemon=True).start()
     
-    def extract_landmarks(self, hand_landmarks):
-        """Extract landmark coordinates."""
-        landmarks = []
-        for landmark in hand_landmarks.landmark:
-            landmarks.extend([landmark.x, landmark.y, landmark.z])
-        return landmarks
-    
-    def process_frame_landmarks(self, results):
-        """Extract landmarks from current frame."""
-        if not results.multi_hand_landmarks:
+    def process_frame_landmarks(self, frame):
+        """Extract landmarks from current frame using SimpleHandExtractor."""
+        # Use SimpleHandExtractor to process frame (same as training)
+        try:
+            landmarks = self.inference.process_frame(frame)
+            return landmarks
+        except Exception as e:
+            debug_log(f"Error processing frame: {e}")
             return None
-        
-        all_landmarks = []
-        for hand_landmarks in results.multi_hand_landmarks:
-            all_landmarks.extend(self.extract_landmarks(hand_landmarks))
-        
-        while len(all_landmarks) < 126:
-            all_landmarks.append(0.0)
-        
-        return all_landmarks[:126]
     
     def normalize_sequence(self, sequence):
         """Normalize sequence to TARGET_FRAMES using interpolation."""
@@ -143,8 +183,8 @@ class SmartStreamlitApp:
         old_indices = np.linspace(0, current_length - 1, current_length)
         new_indices = np.linspace(0, current_length - 1, TARGET_FRAMES)
         
-        normalized = np.zeros((TARGET_FRAMES, 126))
-        for i in range(126):
+        normalized = np.zeros((TARGET_FRAMES, FEATURES_PER_FRAME))
+        for i in range(FEATURES_PER_FRAME):
             normalized[:, i] = np.interp(new_indices, old_indices, sequence[:, i])
         
         return normalized.tolist()
@@ -158,10 +198,12 @@ class SmartStreamlitApp:
         normalized_seq = self.normalize_sequence(sequence)
         normalized_seq = np.array(normalized_seq)
         
-        # Reshape for scaling
-        seq_flat = normalized_seq.reshape(-1, 126)
+        # Flatten the entire sequence for scaling (this is the key fix!)
+        seq_flat = normalized_seq.flatten().reshape(1, -1)  # Shape: (1, 99720)
         seq_scaled = self.scaler.transform(seq_flat)
-        seq_scaled = seq_scaled.reshape(1, TARGET_FRAMES, 126)
+        
+        # Reshape back to LSTM format
+        seq_scaled = seq_scaled.reshape(1, TARGET_FRAMES, FEATURES_PER_FRAME)
         
         # Predict
         predictions = self.model.predict(seq_scaled, verbose=0)[0]
@@ -172,40 +214,24 @@ class SmartStreamlitApp:
         
         return phrase, confidence
     
-    def process_frame(self, frame, hands):
-        """Process a single frame."""
-        # IMPORTANT: Do NOT flip before landmark extraction.
-        # Process original frame to keep coordinates consistent with training.
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb_frame)
-        
-        # Draw landmarks
-        hands_detected = False
-        if results.multi_hand_landmarks:
-            hands_detected = True
-            for hand_landmarks in results.multi_hand_landmarks:
-                self.mp_drawing.draw_landmarks(
-                    frame,
-                    hand_landmarks,
-                    self.mp_hands.HAND_CONNECTIONS,
-                    self.mp_drawing_styles.get_default_hand_landmarks_style(),
-                    self.mp_drawing_styles.get_default_hand_connections_style()
-                )
+    def process_frame(self, frame):
+        """Process a single frame using HolisticInference."""
+        # Process frame using HolisticInference (same preprocessing as training/testing)
+        frame_landmarks = self.process_frame_landmarks(frame)
+        landmarks_detected = frame_landmarks is not None
 
-        # Record if recording is active and hands detected
-        if st.session_state.is_recording and hands_detected:
-            frame_landmarks = self.process_frame_landmarks(results)
-            if frame_landmarks is not None:
-                st.session_state.recorded_frames.append(frame_landmarks)
-                # Limit max frames
-                if len(st.session_state.recorded_frames) > MAX_FRAMES:
-                    st.session_state.recorded_frames.pop(0)
-                # Update frame counter in session state for consistent UI
-                st.session_state.frame_count = len(st.session_state.recorded_frames)
+        # Record if recording is active and landmarks detected
+        if st.session_state.is_recording and landmarks_detected:
+            st.session_state.recorded_frames.append(frame_landmarks)
+            # Limit max frames
+            if len(st.session_state.recorded_frames) > MAX_FRAMES:
+                st.session_state.recorded_frames.pop(0)
+            # Update frame counter in session state for consistent UI
+            st.session_state.frame_count = len(st.session_state.recorded_frames)
         
         # Flip only for display so the UI feels natural
         display_frame = cv2.flip(frame, 1)
-        return display_frame, hands_detected
+        return display_frame, landmarks_detected
 
 
 def main():
@@ -407,50 +433,43 @@ def main():
                 st.error("❌ Cannot access camera")
                 return
             
-            with app.mp_hands.Hands(
-                static_image_mode=False,
-                max_num_hands=2,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
-            ) as hands:
+            # Process frames continuously (removed MediaPipe Hands context manager)
+            while run_camera:
+                ret, frame = cap.read()
                 
-                # Process frames continuously
-                while run_camera:
-                    ret, frame = cap.read()
-                    
-                    if not ret:
-                        st.error("❌ Failed to read from camera")
-                        break
-                    
-                    # Process frame
-                    processed_frame, hands_detected = app.process_frame(frame, hands)
-                    
-                    # Display video
-                    rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                    video_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
-                    
-                    # Update right panel (status + counter) in real-time
-                    if st.session_state.is_recording:
-                        status_banner_ph.error("🔴 **RECORDING IN PROGRESS**")
-                        frame_counter_ph.metric("Frames Captured", st.session_state.frame_count)
-                        if st.session_state.frame_count < MIN_FRAMES:
-                            guidance_ph.warning(f"Need {MIN_FRAMES - st.session_state.frame_count} more frames")
-                        else:
-                            guidance_ph.success("✓ Ready to process!")
+                if not ret:
+                    st.error("❌ Failed to read from camera")
+                    break
+                
+                # Process frame using HolisticInference
+                processed_frame, landmarks_detected = app.process_frame(frame)
+                
+                # Display video
+                rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                video_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
+                
+                # Update right panel (status + counter) in real-time
+                if st.session_state.is_recording:
+                    status_banner_ph.error("🔴 **RECORDING IN PROGRESS**")
+                    frame_counter_ph.metric("Frames Captured", st.session_state.frame_count)
+                    if st.session_state.frame_count < MIN_FRAMES:
+                        guidance_ph.warning(f"Need {MIN_FRAMES - st.session_state.frame_count} more frames")
                     else:
-                        status_banner_ph.info("⚪ Ready to record")
-                        frame_counter_ph.empty()
-                        guidance_ph.empty()
-                    
-                    # Status message
-                    if hands_detected:
-                        status_placeholder.success("✓ Hands detected")
-                    else:
-                        status_placeholder.warning("⚠️ No hands detected")
-                    
-                    # Check if camera should continue (check session state)
-                    if not st.session_state.get('camera_toggle', True):
-                        break
+                        guidance_ph.success("✓ Ready to process!")
+                else:
+                    status_banner_ph.info("⚪ Ready to record")
+                    frame_counter_ph.empty()
+                    guidance_ph.empty()
+                
+                # Status message (updated to show landmarks instead of hands)
+                if landmarks_detected:
+                    status_placeholder.success("✓ Landmarks detected")
+                else:
+                    status_placeholder.warning("⚠️ No landmarks detected")
+                
+                # Check if camera should continue (check session state)
+                if not st.session_state.get('camera_toggle', True):
+                    break
             
             cap.release()
             debug_log("Camera loop stopped (camera released)")

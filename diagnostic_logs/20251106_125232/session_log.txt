@@ -1,0 +1,4 @@
+[12:52:33.610] Diagnostic Session Started: 20251106_125232
+[12:52:33.610] Model: Transformer with 2829062 parameters
+[12:52:33.610] Phrases: {0: 'Hi my name is Reet', 1: 'How are you', 2: 'I am from Delhi', 3: 'I like coffee', 4: 'What do you like'}
+[12:52:33.610] Diagnostic session started
