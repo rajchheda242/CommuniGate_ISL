@@ -130,6 +130,22 @@ class ISLRecognitionApp:
         scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
         mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
         
+        # Check if files exist
+        if not os.path.exists(model_path):
+            st.error(f"❌ Model file not found: {model_path}")
+            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            return
+        
+        if not os.path.exists(scaler_path):
+            st.error(f"❌ Scaler file not found: {scaler_path}")
+            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            return
+        
+        if not os.path.exists(mapping_path):
+            st.error(f"❌ Phrase mapping not found: {mapping_path}")
+            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            return
+        
         try:
             # Load model with compatibility settings
             self.model = load_model(model_path, compile=False, safe_mode=False)
@@ -138,19 +154,35 @@ class ISLRecognitionApp:
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy']
             )
+            st.success(f"✅ Model loaded successfully from {model_path}")
             
+        except (ValueError, OSError) as e:
+            error_msg = str(e)
+            if "expected" in error_msg.lower() and "variables" in error_msg.lower():
+                st.error("❌ Model compatibility error!")
+                st.error(f"Details: {error_msg}")
+                st.warning("The model was trained on a different system. Please retrain on THIS computer:")
+                st.code("python src/training/train_sequence_model.py")
+                return
+            else:
+                st.error(f"❌ Error loading model: {error_msg}")
+                raise
+        
+        try:
             # Load scaler
             self.scaler = joblib.load(scaler_path)
+            st.success(f"✅ Scaler loaded successfully")
             
             # Load phrase mapping and invert it (file has phrase->id, we need id->phrase)
             with open(mapping_path, 'r') as f:
                 phrase_to_id = json.load(f)
                 # Invert the mapping: id -> phrase
                 self.phrase_mapping = {v: k for k, v in phrase_to_id.items()}
+            st.success(f"✅ Phrase mapping loaded: {len(self.phrase_mapping)} phrases")
                 
         except Exception as e:
-            st.error(f"Error loading model: {e}")
-            st.info("Please retrain the model on this computer using: python src/training/train_sequence_model.py")
+            st.error(f"❌ Error loading scaler/mapping: {e}")
+            raise
     
     def init_tts(self):
         """Initialize text-to-speech engine"""
