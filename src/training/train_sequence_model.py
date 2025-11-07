@@ -204,13 +204,13 @@ class SequenceModelTrainer:
         self.model.save(model_path)
         print(f"\nModel saved to: {model_path}")
         
-        # Save scaler
-        scaler_path = os.path.join(MODEL_DIR, "sequence_scaler.joblib")
+        # Save scaler (use .pkl extension for compatibility with app)
+        scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
         joblib.dump(self.scaler, scaler_path)
         print(f"Scaler saved to: {scaler_path}")
         
-        # Save phrase mapping
-        mapping = {i: phrase for i, phrase in enumerate(PHRASES)}
+        # Save phrase mapping (inverted format: phrase -> id for compatibility)
+        mapping = {phrase: i for i, phrase in enumerate(PHRASES)}
         mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
         with open(mapping_path, 'w') as f:
             json.dump(mapping, f, indent=2)
@@ -257,7 +257,7 @@ class SequenceModelTrainer:
         print(f"{'='*70}")
         print(f"Final Test Accuracy: {accuracy:.2%}")
         print("\nNext steps:")
-        print("  Run: streamlit run src/ui/app_sequence.py")
+        print("  Run the app: streamlit run app_enhanced.py")
 
 
 if __name__ == "__main__":
