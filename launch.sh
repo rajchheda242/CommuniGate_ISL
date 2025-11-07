@@ -43,7 +43,7 @@ echo ""
 pkill -f "streamlit run" 2>/dev/null
 
 # Launch Streamlit
-streamlit run src/ui/app.py
+streamlit run app_enhanced.py
 
 echo ""
 echo "👋 CommuniGate ISL stopped."

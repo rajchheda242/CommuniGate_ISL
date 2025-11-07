@@ -81,7 +81,7 @@ REM Kill any existing Streamlit instances
 taskkill /F /IM streamlit.exe 2>nul >nul
 
 REM Launch Streamlit
-streamlit run src\ui\app.py
+streamlit run app_enhanced.py
 
 echo.
 echo ============================================================

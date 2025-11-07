@@ -133,17 +133,49 @@ class ISLRecognitionApp:
         mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
         
         # Try enhanced model first
+        model_loaded = False
+        
         if os.path.exists(enhanced_model_path):
-            self.model = load_model(enhanced_model_path)
-            self.scaler = joblib.load(enhanced_scaler_path)
-            st.sidebar.success("✅ Using Enhanced Model (100% accuracy)")
-        elif os.path.exists(regular_model_path):
-            self.model = load_model(regular_model_path)
-            self.scaler = joblib.load(regular_scaler_path)
-            st.sidebar.info("ℹ️ Using Regular Model")
-        else:
+            try:
+                self.model = load_model(enhanced_model_path, compile=False, safe_mode=False)
+                self.scaler = joblib.load(enhanced_scaler_path)
+                st.sidebar.success("✅ Using Enhanced Model (100% accuracy)")
+                model_loaded = True
+            except (ValueError, OSError) as e:
+                if "expected" in str(e).lower() and "variables" in str(e).lower():
+                    st.sidebar.warning("⚠️ Enhanced model incompatible - trying regular model")
+                else:
+                    raise e
+        
+        if not model_loaded and os.path.exists(regular_model_path):
+            try:
+                self.model = load_model(regular_model_path, compile=False, safe_mode=False)
+                self.scaler = joblib.load(regular_scaler_path)
+                st.sidebar.info("ℹ️ Using Regular Model")
+                model_loaded = True
+            except (ValueError, OSError) as e:
+                if "expected" in str(e).lower() and "variables" in str(e).lower():
+                    st.error("❌ Model compatibility error!")
+                    st.error(f"Error: {str(e)}")
+                    st.warning("""
+                    **The model was trained with a different TensorFlow version.**
+                    
+                    **Solutions:**
+                    1. Retrain the model on Windows computer
+                    2. Or use the same TensorFlow version
+                    
+                    **To retrain (5-10 minutes):**
+                    ```bash
+                    python src/training/train_sequence_model.py
+                    ```
+                    """)
+                    return
+                else:
+                    raise e
+        
+        if not model_loaded:
             st.error("❌ No model found! Please train the model first.")
-            st.code("python enhanced_train.py")
+            st.code("python src/training/train_sequence_model.py")
             return
         
         # Load phrase mapping

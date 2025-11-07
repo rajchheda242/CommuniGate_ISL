@@ -1,0 +1,23 @@
+# Windows-Specific Requirements for CommuniGate ISL
+# Use this if you get DLL errors with regular requirements.txt
+
+# Core Dependencies
+opencv-python>=4.8.0  # Use regular opencv-python on Windows (not headless)
+mediapipe>=0.10.0
+scikit-learn>=1.3.0
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0
+joblib>=1.3.0
+
+# Deep Learning - CPU version for better Windows compatibility
+tensorflow-cpu==2.15.0  # CPU-only, avoids DLL issues
+protobuf<4.0.0,>=3.20.0
+
+# UI Framework
+streamlit>=1.28.0
+
+# Utilities
+pillow>=10.0.0
+
+# Optional: Text-to-Speech (may not work in all environments)
+# pyttsx3>=2.90

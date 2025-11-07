@@ -134,7 +134,30 @@ class SmartStreamlitApp:
             st.info("Please train the model first: `python src/training/train_sequence_model.py`")
             return
         
-        self.model = load_model(model_path)
+        # Try loading model with safe_mode for compatibility
+        try:
+            self.model = load_model(model_path, compile=False, safe_mode=False)
+            debug_log("Model loaded successfully")
+        except (ValueError, OSError) as e:
+            if "expected" in str(e).lower() and "variables" in str(e).lower():
+                st.error("❌ Model compatibility error!")
+                st.error(f"Error: {str(e)}")
+                st.warning("""
+                **The model was trained with a different TensorFlow version.**
+                
+                **Solutions:**
+                1. Retrain the model on this computer
+                2. Or use the same TensorFlow version that was used for training
+                
+                **To retrain (5-10 minutes):**
+                ```
+                python src/training/train_sequence_model.py
+                ```
+                """)
+                return
+            else:
+                raise e
+        
         self.scaler = joblib.load(scaler_path)
         
         with open(mapping_path, 'r') as f:
