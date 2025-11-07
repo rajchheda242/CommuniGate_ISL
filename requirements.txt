@@ -1,37 +1,25 @@
 # Core Dependencies
 opencv-python-headless>=4.8.0  # Use headless for cloud deployment
-# Add mediapipe to requirements
 mediapipe>=0.10.0
 scikit-learn>=1.3.0
 numpy>=1.24.0,<2.0.0  # Pin to 1.x for better compatibility
 pandas>=2.0.0
+joblib>=1.3.0
 
 # Deep Learning (for sequence recognition)
-# Pin TensorFlow to 2.15.x to avoid protobuf >=5 conflict with mediapipe
+# Pin TensorFlow to 2.15.x to avoid protobuf conflict with mediapipe
 tensorflow==2.15.0
-ml-dtypes>=0.2.0,<0.3.0
-
-# PyTorch for Transformer models
-torch>=2.0.0
-torchvision>=0.15.0
-transformers>=4.30.0
+protobuf<4.0.0,>=3.20.0  # Ensure compatibility with mediapipe
 
 # UI Framework
 streamlit>=1.28.0
 
-# Text-to-Speech
-pyttsx3>=2.90
-
-# Packaging
-pyinstaller>=6.0.0
-
-# Development & Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0
-black>=23.0.0
-flake8>=6.0.0
-
 # Utilities
-matplotlib>=3.7.0
-seaborn>=0.12.0
-tqdm>=4.66.0  # Progress bars for video processing
+pillow>=10.0.0  # For image handling
+
+# Note: Removed heavy packages not needed for deployment:
+# - PyTorch/transformers (not used in main app)
+# - pyttsx3 (text-to-speech, optional, causes issues in cloud)
+# - pyinstaller (only needed for local exe building)
+# - Development tools (pytest, black, flake8)
+# - Visualization (matplotlib, seaborn) if not used in app
