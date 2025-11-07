@@ -102,7 +102,7 @@ class ISLRecognitionApp:
         self.init_session_state()
         
         # Load model
-        self.load_model()
+        self.load_model_and_scaler()
         
         # Initialize TTS
         if TTS_AVAILABLE:
