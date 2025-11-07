@@ -121,67 +121,36 @@ class ISLRecognitionApp:
         if 'prediction_history' not in st.session_state:
             st.session_state.prediction_history = []
     
-    def load_model(self):
-        """Load the enhanced trained model"""
-        # Try enhanced model first, fallback to regular model
-        enhanced_model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
-        regular_model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
+    def load_model_and_scaler(self):
+        """Load the trained model, scaler, and phrase mapping"""
+        model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
         
-        enhanced_scaler_path = os.path.join(MODEL_DIR, "sequence_scaler_enhanced.joblib")
-        regular_scaler_path = os.path.join(MODEL_DIR, "sequence_scaler.joblib")
-        
+        scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
         mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
         
-        # Try enhanced model first
-        model_loaded = False
-        
-        if os.path.exists(enhanced_model_path):
-            try:
-                self.model = load_model(enhanced_model_path, compile=False, safe_mode=False)
-                self.scaler = joblib.load(enhanced_scaler_path)
-                st.sidebar.success("✅ Using Enhanced Model (100% accuracy)")
-                model_loaded = True
-            except (ValueError, OSError) as e:
-                if "expected" in str(e).lower() and "variables" in str(e).lower():
-                    st.sidebar.warning("⚠️ Enhanced model incompatible - trying regular model")
-                else:
-                    raise e
-        
-        if not model_loaded and os.path.exists(regular_model_path):
-            try:
-                self.model = load_model(regular_model_path, compile=False, safe_mode=False)
-                self.scaler = joblib.load(regular_scaler_path)
-                st.sidebar.info("ℹ️ Using Regular Model")
-                model_loaded = True
-            except (ValueError, OSError) as e:
-                if "expected" in str(e).lower() and "variables" in str(e).lower():
-                    st.error("❌ Model compatibility error!")
-                    st.error(f"Error: {str(e)}")
-                    st.warning("""
-                    **The model was trained with a different TensorFlow version.**
-                    
-                    **Solutions:**
-                    1. Retrain the model on Windows computer
-                    2. Or use the same TensorFlow version
-                    
-                    **To retrain (5-10 minutes):**
-                    ```bash
-                    python src/training/train_sequence_model.py
-                    ```
-                    """)
-                    return
-                else:
-                    raise e
-        
-        if not model_loaded:
-            st.error("❌ No model found! Please train the model first.")
-            st.code("python src/training/train_sequence_model.py")
-            return
-        
-        # Load phrase mapping
-        with open(mapping_path, 'r') as f:
-            mapping_data = json.load(f)
-            self.phrase_mapping = {v: k for k, v in mapping_data.items()}
+        try:
+            # Load model with compatibility settings
+            self.model = load_model(model_path, compile=False, safe_mode=False)
+            self.model.compile(
+                optimizer='adam',
+                loss='sparse_categorical_crossentropy',
+                metrics=['accuracy']
+            )
+            
+            # Load scaler
+            self.scaler = joblib.load(scaler_path)
+            
+            # Load phrase mapping and invert it (file has phrase->id, we need id->phrase)
+            with open(mapping_path, 'r') as f:
+                phrase_to_id = json.load(f)
+                # Invert the mapping: id -> phrase
+                self.phrase_mapping = {v: k for k, v in phrase_to_id.items()}
+                
+        except Exception as e:
+            st.error(f"Error loading model: {e}")
+            st.info("Please retrain the model on this computer using: python src/training/train_sequence_model.py")
     
     def init_tts(self):
         """Initialize text-to-speech engine"""
@@ -424,8 +393,13 @@ class ISLRecognitionApp:
                         st.write(f"**Total Frames:** {pred['frames']}")
                         st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
         
-        # Camera feed
+        # Camera feed with optimized frame processing
         cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Reduce resolution for performance
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)  # Cap at 30 FPS
+        
+        frame_count = 0
         
         try:
             while True:
@@ -464,11 +438,13 @@ class ISLRecognitionApp:
                 # Convert to RGB for display
                 rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
                 
-                # Display
-                camera_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
+                # Display - only update every 2 frames to reduce lag
+                frame_count += 1
+                if frame_count % 2 == 0:
+                    camera_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
                 
-                # Small delay to prevent overwhelming the UI
-                time.sleep(0.03)  # ~30 FPS
+                # Shorter delay for smoother video
+                time.sleep(0.01)  # ~100 FPS processing, but only display ~15 FPS
                 
         finally:
             cap.release()
