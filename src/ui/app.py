@@ -238,14 +238,30 @@ def main():
     """Main Streamlit application."""
     # Note: app expiry removed to allow continued usage
 
+    # Check for custom logo/icon
+    icon_path = "src/ui/assets/icon.png"
+    page_icon = "🤟"  # Default emoji
+    if os.path.exists(icon_path):
+        page_icon = Image.open(icon_path)
+    
     st.set_page_config(
         page_title="CommuniGate ISL",
-        page_icon="🤟",
+        page_icon=page_icon,
         layout="wide"
     )
     
-    st.title("🤟 CommuniGate ISL - Smart Recognition")
-    st.markdown("### User-Controlled Recording")
+    # Display logo in header if available
+    logo_path = "src/ui/assets/logo.png"
+    if os.path.exists(logo_path):
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            st.image(logo_path, width=100)
+        with col2:
+            st.title("CommuniGate ISL - Smart Recognition")
+            st.markdown("### User-Controlled Recording")
+    else:
+        st.title("🤟 CommuniGate ISL - Smart Recognition")
+        st.markdown("### User-Controlled Recording")
     
     # Initialize app
     app = SmartStreamlitApp()
