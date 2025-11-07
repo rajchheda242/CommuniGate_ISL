@@ -2,9 +2,25 @@
 
 ## 🎯 For Demo/Presentation - FASTEST SETUP
 
-### **What You Need:**
+### **Two Options:**
+
+**Option A: Simple Installation** (Recommended - Easier!) ⭐ **STRESS-FREE**
+- Just install Python, clone repo, run batch file
+- Automatic virtual environment setup
+- All dependencies installed automatically
+- Instructions below
+
+**Option B: Portable Package** (No Python Installation Required!)
+- Works on ANY Windows computer
+- No admin rights needed
+- Just copy folder and double-click!
+- See `PORTABLE_SOLUTION.md` for details
+
+---
+
+### **What You Need (Option A):**
 1. ✅ Windows 10/11 laptop
-2. ✅ Python 3.9 or 3.10 installed
+2. ✅ Python 3.11 or 3.12 installed
 3. ✅ Working webcam
 4. ✅ Internet (first time only)
 
@@ -30,8 +46,9 @@
 
 **Step 1: Install Python** (if not installed)
 - Download: https://www.python.org/downloads/
-- Install Python 3.10.x
+- Install **Python 3.11.x or 3.12.x** (latest stable version)
 - ⚠️ **CHECK "Add Python to PATH"** during installation!
+- ⚠️ **Avoid Python 3.13** (too new, some packages may not be compatible yet)
 
 **Step 2: Open Command Prompt**
 - Press `Win + R`
