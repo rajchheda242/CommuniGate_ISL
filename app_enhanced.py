@@ -441,28 +441,28 @@ class ISLRecognitionApp:
             with button_col1:
                 if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
                     self.start_recording()
-                    st.rerun()
             
             with button_col2:
                 if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
                     self.stop_recording()
-                    st.rerun()
             
             with button_col3:
                 if st.button("🔄 Clear History"):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
-                    st.rerun()
             
             # Recording status
+            status_placeholder = st.empty()
+            progress_placeholder = st.empty()
+            
             if st.session_state.is_recording:
                 frames_recorded = len(st.session_state.recorded_sequence)
                 cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
                 
-                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
-                st.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
+                status_placeholder.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
+                progress_placeholder.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
             else:
-                st.info("⚪ Ready - Click 'Start Recording' to begin")
+                status_placeholder.info("⚪ Ready - Click 'Start Recording' to begin")
         
         with col2:
             st.subheader("🎯 Prediction")
