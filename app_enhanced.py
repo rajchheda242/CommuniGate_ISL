@@ -194,6 +194,8 @@ class ISLRecognitionApp:
             st.session_state.video_processor = None
         if 'enable_tts' not in st.session_state:
             st.session_state.enable_tts = TTS_AVAILABLE
+        if 'live_preview' not in st.session_state:
+            st.session_state.live_preview = False
     
     
 
@@ -375,7 +377,12 @@ class ISLRecognitionApp:
             st.session_state.enable_tts = st.checkbox(
                 "Enable Text-to-Speech", value=st.session_state.get("enable_tts", TTS_AVAILABLE)
             )
-            auto_refresh = st.checkbox("Auto-refresh camera", value=True, help="Updates camera frames in short loop")
+            live_preview_btn = st.button(
+                "▶ Live Preview (10s)",
+                help="Shows continuous camera frames for ~10 seconds without restarting camera"
+            )
+            if live_preview_btn:
+                st.session_state.live_preview = True
             show_debug = st.checkbox("Show Debug Info", value=False)
 
             st.markdown("---")
@@ -421,21 +428,21 @@ class ISLRecognitionApp:
             else:
                 st.info("⚪ Ready - Click 'Start Recording' to begin")
 
-            # Display current frame (with optional short refresh loop)
-            if auto_refresh:
-                for _ in range(30):  # ~0.9s of updates to lower CPU load
-                    frame = st.session_state.get('latest_frame')
-                    if frame is not None:
-                        camera_placeholder.image(frame, channels="RGB", use_container_width=True)
-                    time.sleep(0.03)
-                # Safe rerun using compatibility helper (avoids AttributeError)
-                _safe_rerun()
+            # Display current frame or run a temporary live preview loop
+            frame = st.session_state.get('latest_frame')
+            if st.session_state.live_preview:
+                max_frames = 300  # ~10 seconds at 0.033s sleep
+                for i in range(max_frames):
+                    frame_loop = st.session_state.get('latest_frame')
+                    if frame_loop is not None:
+                        camera_placeholder.image(frame_loop, channels="RGB", use_container_width=True)
+                    time.sleep(0.033)
+                st.session_state.live_preview = False  # auto-stop
             else:
-                frame = st.session_state.get('latest_frame')
                 if frame is not None:
                     camera_placeholder.image(frame, channels="RGB", use_container_width=True)
                 else:
-                    st.warning("Waiting for camera...")
+                    st.warning("Waiting for camera... (Press Live Preview to stream)")
 
         with col2:
             st.subheader("🎯 Prediction")
