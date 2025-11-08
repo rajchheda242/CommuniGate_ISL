@@ -194,8 +194,10 @@ class ISLRecognitionApp:
             st.session_state.video_processor = None
         if 'enable_tts' not in st.session_state:
             st.session_state.enable_tts = TTS_AVAILABLE
-        if 'live_preview' not in st.session_state:
-            st.session_state.live_preview = False
+        if 'preview_enabled' not in st.session_state:
+            st.session_state.preview_enabled = True
+        if 'last_frame_time' not in st.session_state:
+            st.session_state.last_frame_time = 0.0
     
     
 
@@ -377,12 +379,6 @@ class ISLRecognitionApp:
             st.session_state.enable_tts = st.checkbox(
                 "Enable Text-to-Speech", value=st.session_state.get("enable_tts", TTS_AVAILABLE)
             )
-            live_preview_btn = st.button(
-                "▶ Live Preview (10s)",
-                help="Shows continuous camera frames for ~10 seconds without restarting camera"
-            )
-            if live_preview_btn:
-                st.session_state.live_preview = True
             show_debug = st.checkbox("Show Debug Info", value=False)
 
             st.markdown("---")
@@ -419,6 +415,13 @@ class ISLRecognitionApp:
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
 
+            # Preview controls (main area so it's visible)
+            pc1, pc2 = st.columns([1, 2])
+            with pc1:
+                st.session_state.preview_enabled = st.checkbox("Live Preview", value=st.session_state.preview_enabled)
+            with pc2:
+                fps = st.slider("Preview FPS", min_value=5, max_value=30, value=15, help="Affects CPU usage")
+
             # Status
             if st.session_state.is_recording:
                 frames_recorded = len(st.session_state.recorded_sequence)
@@ -428,21 +431,22 @@ class ISLRecognitionApp:
             else:
                 st.info("⚪ Ready - Click 'Start Recording' to begin")
 
-            # Display current frame or run a temporary live preview loop
+            # Display current frame with optional continuous preview
             frame = st.session_state.get('latest_frame')
-            if st.session_state.live_preview:
-                max_frames = 300  # ~10 seconds at 0.033s sleep
-                for i in range(max_frames):
-                    frame_loop = st.session_state.get('latest_frame')
-                    if frame_loop is not None:
-                        camera_placeholder.image(frame_loop, channels="RGB", use_container_width=True)
-                    time.sleep(0.033)
-                st.session_state.live_preview = False  # auto-stop
+            if st.session_state.preview_enabled:
+                # bounded loop + rerun to create continuous preview
+                sleep_s = 1.0 / max(5, min(30, fps))
+                for _ in range(int(1.5 / sleep_s)):  # about 1.5s of updates
+                    f = st.session_state.get('latest_frame')
+                    if f is not None:
+                        camera_placeholder.image(f, channels="RGB", use_container_width=True)
+                    time.sleep(sleep_s)
+                _safe_rerun()
             else:
                 if frame is not None:
                     camera_placeholder.image(frame, channels="RGB", use_container_width=True)
                 else:
-                    st.warning("Waiting for camera... (Press Live Preview to stream)")
+                    st.warning("Waiting for camera...")
 
         with col2:
             st.subheader("🎯 Prediction")
@@ -565,6 +569,7 @@ class VideoProcessor:
             # Update latest frame in session state (RGB for Streamlit)
             st.session_state.latest_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
             st.session_state.hands_detected = hands_detected
+            st.session_state.last_frame_time = time.time()
 
             # Throttle to ~15-20 FPS display/update
             frame_counter += 1
