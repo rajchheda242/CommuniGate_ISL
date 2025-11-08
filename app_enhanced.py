@@ -112,11 +112,15 @@ class ISLRecognitionApp:
         self.scaler = None
         self.phrase_mapping = None
         self.tts_engine = None
+        # Collect status messages to render later (avoid early Streamlit messages at top)
+        # Each item: {"level": "success|info|warning|error", "text": str}
+        self.status_messages = []
+        self.load_ok = False
         
         # Initialize session state
         self.init_session_state()
         
-        # Load model
+        # Load model (store messages to display later in UI)
         self.load_model_and_scaler()
         
         # Initialize TTS
@@ -183,8 +187,29 @@ class ISLRecognitionApp:
         st.error("Failed to initialize camera after multiple attempts")
         return None
     
+    def add_status(self, level, text):
+        """Store a status message to show later in the UI"""
+        self.status_messages.append({"level": level, "text": text})
+
+    def display_status(self):
+        """Render stored status messages inside an expander/container"""
+        if not self.status_messages:
+            return
+        with st.expander("System status", expanded=False):
+            for msg in self.status_messages:
+                lvl = msg.get("level", "info").lower()
+                txt = msg.get("text", "")
+                if lvl == "success":
+                    st.success(txt)
+                elif lvl == "warning":
+                    st.warning(txt)
+                elif lvl == "error":
+                    st.error(txt)
+                else:
+                    st.info(txt)
+
     def load_model_and_scaler(self):
-        """Load the trained model, scaler, and phrase mapping"""
+        """Load the trained model, scaler, and phrase mapping without emitting Streamlit UI immediately"""
         model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
         if not os.path.exists(model_path):
             model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
@@ -194,18 +219,21 @@ class ISLRecognitionApp:
         
         # Check if files exist
         if not os.path.exists(model_path):
-            st.error(f"❌ Model file not found: {model_path}")
-            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            self.add_status("error", f"❌ Model file not found: {model_path}")
+            self.add_status("info", "Please retrain the model: python src/training/train_sequence_model.py")
+            self.load_ok = False
             return
         
         if not os.path.exists(scaler_path):
-            st.error(f"❌ Scaler file not found: {scaler_path}")
-            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            self.add_status("error", f"❌ Scaler file not found: {scaler_path}")
+            self.add_status("info", "Please retrain the model: python src/training/train_sequence_model.py")
+            self.load_ok = False
             return
         
         if not os.path.exists(mapping_path):
-            st.error(f"❌ Phrase mapping not found: {mapping_path}")
-            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            self.add_status("error", f"❌ Phrase mapping not found: {mapping_path}")
+            self.add_status("info", "Please retrain the model: python src/training/train_sequence_model.py")
+            self.load_ok = False
             return
         
         try:
@@ -216,35 +244,41 @@ class ISLRecognitionApp:
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy']
             )
-            st.success(f"✅ Model loaded successfully from {model_path}")
+            self.add_status("success", f"✅ Model loaded successfully from {model_path}")
             
         except (ValueError, OSError) as e:
             error_msg = str(e)
             if "expected" in error_msg.lower() and "variables" in error_msg.lower():
-                st.error("❌ Model compatibility error!")
-                st.error(f"Details: {error_msg}")
-                st.warning("The model was trained on a different system. Please retrain on THIS computer:")
-                st.code("python src/training/train_sequence_model.py")
+                self.add_status("error", "❌ Model compatibility error!")
+                self.add_status("error", f"Details: {error_msg}")
+                self.add_status("warning", "The model was trained on a different system. Please retrain on THIS computer:")
+                self.add_status("info", "python src/training/train_sequence_model.py")
+                self.load_ok = False
                 return
             else:
-                st.error(f"❌ Error loading model: {error_msg}")
-                raise
+                self.add_status("error", f"❌ Error loading model: {error_msg}")
+                self.load_ok = False
+                return
         
         try:
             # Load scaler
             self.scaler = joblib.load(scaler_path)
-            st.success(f"✅ Scaler loaded successfully")
+            self.add_status("success", "✅ Scaler loaded successfully")
             
             # Load phrase mapping and invert it (file has phrase->id, we need id->phrase)
             with open(mapping_path, 'r') as f:
                 phrase_to_id = json.load(f)
                 # Invert the mapping: id -> phrase
                 self.phrase_mapping = {v: k for k, v in phrase_to_id.items()}
-            st.success(f"✅ Phrase mapping loaded: {len(self.phrase_mapping)} phrases")
+            self.add_status("success", f"✅ Phrase mapping loaded: {len(self.phrase_mapping)} phrases")
                 
         except Exception as e:
-            st.error(f"❌ Error loading scaler/mapping: {e}")
-            raise
+            self.add_status("error", f"❌ Error loading scaler/mapping: {e}")
+            self.load_ok = False
+            return
+
+        # If we reached here, loading is OK
+        self.load_ok = True
     
     def init_tts(self):
         """Initialize text-to-speech engine"""
@@ -370,6 +404,7 @@ class ISLRecognitionApp:
     
     def run(self):
         """Run the Streamlit application"""
+        # Configure page first so nothing renders above the header
         st.set_page_config(
             page_title="ISL Recognition",
             page_icon="🤟",
@@ -377,14 +412,34 @@ class ISLRecognitionApp:
             initial_sidebar_state="expanded"
         )
         
-        # Initialize camera at startup (after page config)
-        cap = self.initialize_camera()
-        if not cap:
-            st.error("Camera not available")
-            return
-        
-        st.title("🤟 Indian Sign Language Recognition")
-        st.markdown("### Enhanced Model - Manual Recording Control")
+        # Header with logo and title side-by-side (robust file search + fallback)
+        def _find_logo():
+            candidate_paths = [
+                "logo.png",
+                os.path.join("src", "ui", "assets", "logo.png"),
+                os.path.join("assets", "logo.png")
+            ]
+            for p in candidate_paths:
+                if os.path.exists(p):
+                    return p
+            return None
+
+        logo_path = _find_logo()
+
+        header_col1, header_col2 = st.columns([1, 6])
+        with header_col1:
+            if logo_path:
+                try:
+                    logo = Image.open(logo_path)
+                    # Render logo directly without extra container to avoid top white bar
+                    st.image(logo, caption=None, use_container_width=True)
+                except Exception as e:
+                    st.caption(f"Logo load failed: {e}")
+            else:
+                st.caption("(Logo missing – place file at src/ui/assets/logo.png or root as logo.png)")
+        with header_col2:
+            st.markdown("<h1 style='margin-bottom:0;'>🤟 Indian Sign Language Recognition</h1>", unsafe_allow_html=True)
+            st.markdown("<div style='color:#6c757d;'>Enhanced Model - Manual Recording Control</div>", unsafe_allow_html=True)
         
         # Sidebar
         with st.sidebar:
@@ -422,9 +477,11 @@ class ISLRecognitionApp:
             # Model info
             st.header("📊 Model Info")
             if self.model:
-                st.success("✅ Model Loaded")
+                st.info("Model loaded")
                 st.info(f"Sequence Length: {SEQUENCE_LENGTH} frames")
                 st.info(f"Features: {FEATURES_PER_FRAME} per frame")
+            else:
+                st.warning("Model not loaded. Check System status below for details.")
         
         # Main content - two columns
         col1, col2 = st.columns([2, 1])
@@ -440,18 +497,19 @@ class ISLRecognitionApp:
             
             with button_col1:
                 if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
-                    # Only update state; avoid immediate rerun to keep UI stable
                     self.start_recording()
+                    st.rerun()
             
             with button_col2:
                 if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
-                    # Only update state; avoid immediate rerun to keep UI stable
                     self.stop_recording()
+                    st.rerun()
             
             with button_col3:
                 if st.button("🔄 Clear History"):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
+                    st.rerun()
             
             # Recording status
             if st.session_state.is_recording:
@@ -462,17 +520,6 @@ class ISLRecognitionApp:
                 st.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
             else:
                 st.info("⚪ Ready - Click 'Start Recording' to begin")
-
-            # Optional debug info
-            if show_debug:
-                st.markdown("---")
-                st.markdown("**Debug Info:**")
-                st.write({
-                    "Recording State": st.session_state.is_recording,
-                    "Start Button Disabled": st.session_state.is_recording,
-                    "Stop Button Disabled": not st.session_state.is_recording,
-                    "Sequence Length": len(st.session_state.recorded_sequence),
-                })
         
         with col2:
             st.subheader("🎯 Prediction")
@@ -503,11 +550,20 @@ class ISLRecognitionApp:
                         st.write(f"**Confidence:** {pred['confidence']:.1f}%")
                         st.write(f"**Total Frames:** {pred['frames']}")
                         st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
-        
-                # Camera feed with optimized frame processing
+
+        # Status messages at the bottom of the main page
+        st.markdown("---")
+        self.display_status()
+
+        # Initialize camera after UI is laid out
+        cap = self.initialize_camera()
+        if not cap:
+            st.error("Camera not available")
+            return
+
+        # Camera feed with optimized frame processing
         try:
-            # Process a small chunk of frames per run to keep the UI responsive
-            for _ in range(20):  # ~20 frames per run (~0.2s at 100fps loop)
+            while True:
                 ret, frame = st.session_state.camera.read()
                 if not ret:
                     st.error("Failed to get frame from camera")
@@ -516,7 +572,7 @@ class ISLRecognitionApp:
                 
                 frame = cv2.flip(frame, 1)
                 
-                # Process frame
+                # Process frame in background thread
                 landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
                 
                 # Record if active
@@ -539,14 +595,11 @@ class ISLRecognitionApp:
                     continue
 
                 # Small delay to prevent CPU overload
-                time.sleep(0.01)  # ~10ms delay
+                time.sleep(0.01)  # 10ms delay
 
                 # Lightweight UI update
                 if st.session_state.frame_count % 10 == 0:
                     st.empty()
-            
-            # After a short burst of frames, trigger a rerun to process UI events/buttons
-            st.rerun()
                     
         except Exception as e:
             st.error(f"Camera error: {str(e)}")
