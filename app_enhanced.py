@@ -19,6 +19,8 @@ import time
 from tensorflow.keras.models import load_model
 from datetime import datetime
 import mediapipe as mp
+import threading
+from io import BytesIO
 
 # Try to import text-to-speech (optional)
 try:
@@ -34,6 +36,14 @@ FEATURES_PER_FRAME = 126  # 2 hands × 21 landmarks × 3 coords
 MIN_DETECTION_CONFIDENCE = 0.5  # Lower threshold for better detection
 MIN_TRACKING_CONFIDENCE = 0.5  # Lower threshold for smoother tracking
 SMOOTHING_FACTOR = 0.2  # Light smoothing to maintain responsiveness
+
+# Globals for background video thread and recording buffer
+VIDEO_THREAD = None
+VIDEO_THREAD_RUNNING = False
+LATEST_FRAME_BYTES = None
+RECORDED_BUFFER = []
+REC_LOCK = threading.Lock()
+RECORDING_FLAG = False
 
 
 class HandLandmarkExtractor:
@@ -143,6 +153,9 @@ class ISLRecognitionApp:
             st.session_state.last_button_press = None
         if 'button_clicked_time' not in st.session_state:
             st.session_state.button_clicked_time = 0.0
+        # Ensure there is a place to store the final copied recorded sequence
+        if 'recorded_sequence' not in st.session_state:
+            st.session_state.recorded_sequence = []
 
     def initialize_camera(self):
         """Initialize camera capture with retry mechanism"""
@@ -340,53 +353,58 @@ class ISLRecognitionApp:
     
     def start_recording(self):
         """Start recording a new sequence"""
+        global RECORDED_BUFFER, RECORDING_FLAG
         print("Debug: Starting recording")  # Debug print
-        if not st.session_state.is_recording:  # Only start if not already recording
+        if not st.session_state.is_recording:
+            # Clear shared buffer and set recording flag used by background thread
+            with REC_LOCK:
+                RECORDED_BUFFER = []
+            RECORDING_FLAG = True
             st.session_state.is_recording = True
-            st.session_state.recorded_sequence = []
             st.session_state.last_prediction = None
             st.session_state.last_confidence = 0.0
-            print("Debug: Recording started successfully")  # Debug print
+            print("Debug: Recording started successfully")
         else:
-            print("Debug: Start recording called while already recording")  # Debug print
+            print("Debug: Start recording called while already recording")
     
     def stop_recording(self):
         """Stop recording and predict"""
-        print("Debug: Stopping recording")  # Debug print
-        if st.session_state.is_recording:  # Only stop if currently recording
+        global RECORDED_BUFFER, RECORDING_FLAG
+        print("Debug: Stopping recording")
+        if st.session_state.is_recording:
+            # Turn off recording flag so background thread stops appending
+            RECORDING_FLAG = False
             st.session_state.is_recording = False
-            print(f"Debug: Recorded sequence length: {len(st.session_state.recorded_sequence)}")  # Debug print
-            
+
+            # Copy recorded frames from shared buffer into session_state for prediction
+            with REC_LOCK:
+                copied = RECORDED_BUFFER.copy()
+            st.session_state.recorded_sequence = copied
+            print(f"Debug: Copied recorded sequence length: {len(copied)}")
+
             if len(st.session_state.recorded_sequence) > 0:
-                # Predict the recorded sequence
                 phrase, confidence, all_confidences = self.predict_sequence(
                     st.session_state.recorded_sequence
                 )
-            
-            if phrase:
-                st.session_state.last_prediction = phrase
-                st.session_state.last_confidence = confidence
-                
-                # Add to history
-                st.session_state.prediction_history.append({
-                    'phrase': phrase,
-                    'confidence': confidence,
-                    'timestamp': datetime.now().strftime('%H:%M:%S'),
-                    'frames': len(st.session_state.recorded_sequence),
-                    'cleaned_frames': len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                })
-                
-                # Speak the prediction
-                if TTS_AVAILABLE:
-                    self.speak(phrase)
+
+                if phrase:
+                    st.session_state.last_prediction = phrase
+                    st.session_state.last_confidence = confidence
+                    # Add to history
+                    st.session_state.prediction_history.append({
+                        'phrase': phrase,
+                        'confidence': confidence,
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'frames': len(st.session_state.recorded_sequence),
+                        'cleaned_frames': len(self.remove_blank_frames(st.session_state.recorded_sequence))
+                    })
+                    if TTS_AVAILABLE:
+                        self.speak(phrase)
     
     def run(self):
         """Run the Streamlit application"""
-        # Initialize camera at startup
-        cap = self.initialize_camera()
-        if not cap:
-            st.error("Camera not available")
-            return
+        # Start background video thread (keeps camera open across reruns)
+        self.start_video_thread()
 
         st.set_page_config(
             page_title="ISL Recognition",
