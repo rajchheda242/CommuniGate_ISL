@@ -378,7 +378,12 @@ class ISLRecognitionApp:
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            # Control buttons at the top (fixed position)
+            # Camera feed title and placeholder at top
+            st.subheader("📹 Camera Feed")
+            camera_placeholder = st.empty()
+            
+            # Control buttons BELOW camera (better UX)
+            st.markdown("---")
             button_col1, button_col2, button_col3 = st.columns(3)
             
             with button_col1:
@@ -394,24 +399,24 @@ class ISLRecognitionApp:
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
             
-            # Recording status (fixed position, minimal content)
-            status_placeholder = st.empty()
-            with status_placeholder.container():
-                if st.session_state.is_recording:
-                    frames_recorded = len(st.session_state.recorded_sequence)
-                    cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                    
-                    col_status1, col_status2 = st.columns([3, 1])
-                    with col_status1:
-                        st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} valid)")
-                    with col_status2:
-                        st.metric("Progress", f"{min(frames_recorded, 150)}/150")
-                else:
+            # Recording status below buttons
+            if st.session_state.is_recording:
+                frames_recorded = len(st.session_state.recorded_sequence)
+                cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
+                
+                col_status1, col_status2 = st.columns([3, 1])
+                with col_status1:
+                    st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} valid)")
+                with col_status2:
+                    st.metric("Progress", f"{min(frames_recorded, 150)}/150")
+            else:
+                # Show refresh button only when not recording
+                col_ready, col_refresh = st.columns([3, 1])
+                with col_ready:
                     st.info("⚪ Ready - Click 'Start Recording' to begin")
-            
-            # Camera feed title and placeholder
-            st.subheader("📹 Camera Feed")
-            camera_placeholder = st.empty()
+                with col_refresh:
+                    if st.button("🔄 Refresh", key="refresh_camera", help="Refresh camera feed"):
+                        st.rerun()
         
         with col2:
             st.subheader("🎯 Prediction")
@@ -443,68 +448,65 @@ class ISLRecognitionApp:
                         st.write(f"**Total Frames:** {pred['frames']}")
                         st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
         
-        # Create persistent camera using fragment for continuous updates
-        @st.fragment(run_every=0.033)  # ~30 FPS refresh rate
-        def camera_feed():
-            # Initialize camera in session state if not already done
-            if 'camera' not in st.session_state or st.session_state.camera is None:
-                with st.spinner("🎥 Starting camera..."):
-                    st.session_state.camera = cv2.VideoCapture(0)
-                    st.session_state.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    st.session_state.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    st.session_state.camera.set(cv2.CAP_PROP_FPS, 30)
-                    st.session_state.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer lag
-            
-            # Use the persistent camera
-            cap = st.session_state.camera
-            
-            # Read and process frame
-            ret, frame = cap.read()
-            
-            if ret:
-                frame = cv2.flip(frame, 1)
-                
-                # Get extractor (lazy load)
-                extractor = self.get_extractor()
-                
-                # Process frame
-                landmarks, annotated_frame, hands_detected = extractor.process_frame(frame)
-                
-                # Record if active
-                if st.session_state.is_recording:
-                    st.session_state.recorded_sequence.append(landmarks)
-                    
-                    # Add recording indicator
-                    cv2.circle(annotated_frame, (30, 30), 15, (0, 0, 255), -1)
-                    cv2.putText(annotated_frame, "REC", (60, 40),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    
-                    # Show frame count
-                    frames_recorded = len(st.session_state.recorded_sequence)
-                    cv2.putText(annotated_frame, f"Frames: {frames_recorded}", (60, 70),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                
-                # Show hands detected status
-                if hands_detected:
-                    cv2.putText(annotated_frame, "Hands: Detected", (10, annotated_frame.shape[0] - 20),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                else:
-                    cv2.putText(annotated_frame, "Hands: Not Detected", (10, annotated_frame.shape[0] - 20),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                
-                # Convert to RGB for display
-                rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-                
-                # Display frame
-                camera_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
-            else:
-                st.error("Failed to access camera")
-                if st.session_state.camera is not None:
-                    st.session_state.camera.release()
-                    st.session_state.camera = None
+        # Initialize camera and get ONE frame per page load
+        if 'camera' not in st.session_state or st.session_state.camera is None:
+            with st.spinner("🎥 Starting camera..."):
+                st.session_state.camera = cv2.VideoCapture(0)
+                st.session_state.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                st.session_state.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                st.session_state.camera.set(cv2.CAP_PROP_FPS, 30)
+                st.session_state.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        # Run the camera feed fragment
-        camera_feed()
+        # Process ONE frame - no continuous loop
+        cap = st.session_state.camera
+        ret, frame = cap.read()
+        
+        if ret:
+            frame = cv2.flip(frame, 1)
+            
+            # Get extractor (lazy load)
+            extractor = self.get_extractor()
+            
+            # Process frame
+            landmarks, annotated_frame, hands_detected = extractor.process_frame(frame)
+            
+            # Record if active
+            if st.session_state.is_recording:
+                st.session_state.recorded_sequence.append(landmarks)
+                
+                # Add recording indicator
+                cv2.circle(annotated_frame, (30, 30), 15, (0, 0, 255), -1)
+                cv2.putText(annotated_frame, "REC", (60, 40),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                
+                # Show frame count
+                frames_recorded = len(st.session_state.recorded_sequence)
+                cv2.putText(annotated_frame, f"Frames: {frames_recorded}", (60, 70),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+            # Show hands detected status
+            if hands_detected:
+                cv2.putText(annotated_frame, "Hands: Detected", (10, annotated_frame.shape[0] - 20),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            else:
+                cv2.putText(annotated_frame, "Hands: Not Detected", (10, annotated_frame.shape[0] - 20),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            
+            # Convert to RGB for display
+            rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            
+            # Display frame
+            camera_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
+        else:
+            st.error("Failed to access camera")
+            if st.session_state.camera is not None:
+                st.session_state.camera.release()
+                st.session_state.camera = None
+        
+        # Auto-refresh only when recording (minimal refreshes)
+        if st.session_state.is_recording:
+            time.sleep(0.1)  # Small delay to prevent excessive CPU usage
+            st.rerun()
 
 
 def cleanup_camera():
