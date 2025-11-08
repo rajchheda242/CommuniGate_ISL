@@ -439,15 +439,17 @@ class ISLRecognitionApp:
             button_col1, button_col2, button_col3 = st.columns(3)
             
             with button_col1:
-                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
+                start_clicked = st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording)
+                if start_clicked and not st.session_state.is_recording:
                     self.start_recording()
             
             with button_col2:
-                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
+                stop_clicked = st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording)
+                if stop_clicked and st.session_state.is_recording:
                     self.stop_recording()
             
             with button_col3:
-                if st.button("🔄 Clear History"):
+                if st.button("🔄 Clear History", disabled=st.session_state.is_recording):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
             
