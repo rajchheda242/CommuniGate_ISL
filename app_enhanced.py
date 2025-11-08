@@ -19,6 +19,7 @@ import time
 from tensorflow.keras.models import load_model
 from datetime import datetime
 import mediapipe as mp
+import atexit
 
 # Try to import text-to-speech (optional)
 try:
@@ -92,21 +93,28 @@ class ISLRecognitionApp:
     """Enhanced Streamlit application for ISL recognition"""
     
     def __init__(self):
-        self.extractor = HandLandmarkExtractor()
+        # Lazy-load extractor only when needed (camera starts)
+        self.extractor = None
         self.model = None
         self.scaler = None
         self.phrase_mapping = None
         self.tts_engine = None
         
-        # Initialize session state
+        # Initialize session state first (fast)
         self.init_session_state()
         
-        # Load model
+        # Load model (can be slow, but necessary)
         self.load_model_and_scaler()
         
-        # Initialize TTS
-        if TTS_AVAILABLE:
-            self.init_tts()
+        # Initialize TTS lazily (only when needed)
+        # if TTS_AVAILABLE:
+        #     self.init_tts()
+    
+    def get_extractor(self):
+        """Lazy-load the hand landmark extractor"""
+        if self.extractor is None:
+            self.extractor = HandLandmarkExtractor()
+        return self.extractor
     
     def init_session_state(self):
         """Initialize Streamlit session state variables"""
@@ -120,6 +128,10 @@ class ISLRecognitionApp:
             st.session_state.last_confidence = 0.0
         if 'prediction_history' not in st.session_state:
             st.session_state.prediction_history = []
+        if 'camera_active' not in st.session_state:
+            st.session_state.camera_active = False
+        if 'frame_placeholder' not in st.session_state:
+            st.session_state.frame_placeholder = None
     
     def load_model_and_scaler(self):
         """Load the trained model, scaler, and phrase mapping"""
@@ -194,8 +206,13 @@ class ISLRecognitionApp:
     
     def speak(self, text):
         """Speak the predicted phrase"""
-        if self.tts_engine and TTS_AVAILABLE:
+        if TTS_AVAILABLE:
             try:
+                # Lazy init TTS engine
+                if self.tts_engine is None:
+                    self.tts_engine = pyttsx3.init()
+                    self.tts_engine.setProperty('rate', 150)
+                
                 self.tts_engine.say(text)
                 self.tts_engine.runAndWait()
             except:
@@ -273,7 +290,7 @@ class ISLRecognitionApp:
         return predicted_phrase, confidence, prediction
     
     def start_recording(self):
-        """Start recording a new sequence"""
+        """Start recording a new sequence - NO PAGE REFRESH"""
         st.session_state.is_recording = True
         st.session_state.recorded_sequence = []
         st.session_state.last_prediction = None
@@ -361,39 +378,40 @@ class ISLRecognitionApp:
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.subheader("📹 Camera Feed")
-            
-            # Camera placeholder
-            camera_placeholder = st.empty()
-            
-            # Control buttons
+            # Control buttons at the top (fixed position)
             button_col1, button_col2, button_col3 = st.columns(3)
             
             with button_col1:
-                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
+                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording, key="start_btn", use_container_width=True):
                     self.start_recording()
-                    st.rerun()
             
             with button_col2:
-                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
+                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording, key="stop_btn", use_container_width=True):
                     self.stop_recording()
-                    st.rerun()
             
             with button_col3:
-                if st.button("🔄 Clear History"):
+                if st.button("🔄 Clear History", key="clear_btn", use_container_width=True):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
-                    st.rerun()
             
-            # Recording status
-            if st.session_state.is_recording:
-                frames_recorded = len(st.session_state.recorded_sequence)
-                cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                
-                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
-                st.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
-            else:
-                st.info("⚪ Ready - Click 'Start Recording' to begin")
+            # Recording status (fixed position, minimal content)
+            status_placeholder = st.empty()
+            with status_placeholder.container():
+                if st.session_state.is_recording:
+                    frames_recorded = len(st.session_state.recorded_sequence)
+                    cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
+                    
+                    col_status1, col_status2 = st.columns([3, 1])
+                    with col_status1:
+                        st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} valid)")
+                    with col_status2:
+                        st.metric("Progress", f"{min(frames_recorded, 150)}/150")
+                else:
+                    st.info("⚪ Ready - Click 'Start Recording' to begin")
+            
+            # Camera feed title and placeholder
+            st.subheader("📹 Camera Feed")
+            camera_placeholder = st.empty()
         
         with col2:
             st.subheader("🎯 Prediction")
@@ -425,25 +443,32 @@ class ISLRecognitionApp:
                         st.write(f"**Total Frames:** {pred['frames']}")
                         st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
         
-        # Camera feed with optimized frame processing
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Reduce resolution for performance
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, 30)  # Cap at 30 FPS
-        
-        frame_count = 0
-        
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("Failed to access camera")
-                    break
-                
+        # Create persistent camera using fragment for continuous updates
+        @st.fragment(run_every=0.033)  # ~30 FPS refresh rate
+        def camera_feed():
+            # Initialize camera in session state if not already done
+            if 'camera' not in st.session_state or st.session_state.camera is None:
+                with st.spinner("🎥 Starting camera..."):
+                    st.session_state.camera = cv2.VideoCapture(0)
+                    st.session_state.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    st.session_state.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    st.session_state.camera.set(cv2.CAP_PROP_FPS, 30)
+                    st.session_state.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer lag
+            
+            # Use the persistent camera
+            cap = st.session_state.camera
+            
+            # Read and process frame
+            ret, frame = cap.read()
+            
+            if ret:
                 frame = cv2.flip(frame, 1)
                 
+                # Get extractor (lazy load)
+                extractor = self.get_extractor()
+                
                 # Process frame
-                landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
+                landmarks, annotated_frame, hands_detected = extractor.process_frame(frame)
                 
                 # Record if active
                 if st.session_state.is_recording:
@@ -470,18 +495,32 @@ class ISLRecognitionApp:
                 # Convert to RGB for display
                 rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
                 
-                # Display - only update every 2 frames to reduce lag
-                frame_count += 1
-                if frame_count % 2 == 0:
-                    camera_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
-                
-                # Shorter delay for smoother video
-                time.sleep(0.01)  # ~100 FPS processing, but only display ~15 FPS
-                
-        finally:
-            cap.release()
+                # Display frame
+                camera_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
+            else:
+                st.error("Failed to access camera")
+                if st.session_state.camera is not None:
+                    st.session_state.camera.release()
+                    st.session_state.camera = None
+        
+        # Run the camera feed fragment
+        camera_feed()
+
+
+def cleanup_camera():
+    """Release camera on app exit"""
+    if 'camera' in st.session_state and st.session_state.camera is not None:
+        try:
+            st.session_state.camera.release()
+            st.session_state.camera = None
+        except:
+            pass
 
 
 if __name__ == "__main__":
+    # Register cleanup
+    atexit.register(cleanup_camera)
+    
+    # Run app
     app = ISLRecognitionApp()
     app.run()
