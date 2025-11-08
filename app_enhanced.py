@@ -450,31 +450,36 @@ class ISLRecognitionApp:
             # Control buttons with debug info and state management
             button_col1, button_col2, button_col3, debug_col = st.columns([1,1,1,2])
             
-            # Add button state tracking to session state
-            if 'last_button_press' not in st.session_state:
-                st.session_state.last_button_press = None
+            current_time = time.time()
+            
+            def can_click_button():
+                """Check if enough time has passed since last button click"""
+                if 'last_click_time' not in st.session_state:
+                    st.session_state.last_click_time = 0
+                return (current_time - st.session_state.last_click_time) > 1.0
             
             with button_col1:
-                start_disabled = st.session_state.is_recording
-                start_clicked = st.button("🎬 Start Recording", type="primary", disabled=start_disabled, key="start_btn")
-                if start_clicked and not start_disabled and st.session_state.last_button_press != "start":
-                    st.info("Debug: Start button clicked")
-                    st.session_state.last_button_press = "start"
-                    self.start_recording()
+                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording, key="start_btn"):
+                    if can_click_button() and not st.session_state.is_recording:
+                        st.session_state.last_click_time = current_time
+                        print("Debug: Start button clicked and validated")
+                        self.start_recording()
+                        st.experimental_rerun()
             
             with button_col2:
-                stop_disabled = not st.session_state.is_recording
-                stop_clicked = st.button("⏹️ Stop & Predict", type="secondary", disabled=stop_disabled, key="stop_btn")
-                if stop_clicked and not stop_disabled and st.session_state.last_button_press != "stop":
-                    st.info("Debug: Stop button clicked")
-                    st.session_state.last_button_press = "stop"
-                    self.stop_recording()
+                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording, key="stop_btn"):
+                    if can_click_button() and st.session_state.is_recording:
+                        st.session_state.last_click_time = current_time
+                        print("Debug: Stop button clicked and validated")
+                        self.stop_recording()
+                        st.experimental_rerun()
             
             with button_col3:
-                clear_clicked = st.button("🔄 Clear History", key="clear_btn")
-                if clear_clicked:
-                    st.session_state.prediction_history = []
-                    st.session_state.last_prediction = None
+                if st.button("🔄 Clear History", key="clear_btn"):
+                    if can_click_button():
+                        st.session_state.last_click_time = current_time
+                        st.session_state.prediction_history = []
+                        st.session_state.last_prediction = None
             
             # Debug information
             with debug_col:
