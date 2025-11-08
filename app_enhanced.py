@@ -336,20 +336,28 @@ class ISLRecognitionApp:
     
     def start_recording(self):
         """Start recording a new sequence"""
-        st.session_state.is_recording = True
-        st.session_state.recorded_sequence = []
-        st.session_state.last_prediction = None
-        st.session_state.last_confidence = 0.0
+        print("Debug: Starting recording")  # Debug print
+        if not st.session_state.is_recording:  # Only start if not already recording
+            st.session_state.is_recording = True
+            st.session_state.recorded_sequence = []
+            st.session_state.last_prediction = None
+            st.session_state.last_confidence = 0.0
+            print("Debug: Recording started successfully")  # Debug print
+        else:
+            print("Debug: Start recording called while already recording")  # Debug print
     
     def stop_recording(self):
         """Stop recording and predict"""
-        st.session_state.is_recording = False
-        
-        if len(st.session_state.recorded_sequence) > 0:
-            # Predict the recorded sequence
-            phrase, confidence, all_confidences = self.predict_sequence(
-                st.session_state.recorded_sequence
-            )
+        print("Debug: Stopping recording")  # Debug print
+        if st.session_state.is_recording:  # Only stop if currently recording
+            st.session_state.is_recording = False
+            print(f"Debug: Recorded sequence length: {len(st.session_state.recorded_sequence)}")  # Debug print
+            
+            if len(st.session_state.recorded_sequence) > 0:
+                # Predict the recorded sequence
+                phrase, confidence, all_confidences = self.predict_sequence(
+                    st.session_state.recorded_sequence
+                )
             
             if phrase:
                 st.session_state.last_prediction = phrase
@@ -435,23 +443,34 @@ class ISLRecognitionApp:
             # Camera placeholder
             camera_placeholder = st.empty()
             
-            # Control buttons
-            button_col1, button_col2, button_col3 = st.columns(3)
+            # Control buttons with debug info
+            button_col1, button_col2, button_col3, debug_col = st.columns([1,1,1,2])
             
             with button_col1:
                 start_clicked = st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording)
-                if start_clicked and not st.session_state.is_recording:
+                if start_clicked:
+                    st.info("Debug: Start button clicked")
                     self.start_recording()
             
             with button_col2:
                 stop_clicked = st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording)
-                if stop_clicked and st.session_state.is_recording:
+                if stop_clicked:
+                    st.info("Debug: Stop button clicked")
                     self.stop_recording()
             
             with button_col3:
-                if st.button("🔄 Clear History", disabled=st.session_state.is_recording):
+                if st.button("🔄 Clear History"):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
+            
+            # Debug information
+            with debug_col:
+                if show_debug:
+                    st.write("🔍 Debug Info:")
+                    st.write(f"Recording State: {st.session_state.is_recording}")
+                    st.write(f"Start Button Disabled: {st.session_state.is_recording}")
+                    st.write(f"Stop Button Disabled: {not st.session_state.is_recording}")
+                    st.write(f"Sequence Length: {len(st.session_state.recorded_sequence)}")
             
             # Recording status
             status_placeholder = st.empty()
