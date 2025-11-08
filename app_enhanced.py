@@ -19,7 +19,6 @@ import time
 from tensorflow.keras.models import load_model
 from datetime import datetime
 import mediapipe as mp
-import threading
 
 # Try to import text-to-speech (optional)
 try:
@@ -140,67 +139,6 @@ class ISLRecognitionApp:
             st.session_state.camera = None
         if 'frame_count' not in st.session_state:
             st.session_state.frame_count = 0
-        if 'last_button_press' not in st.session_state:
-            st.session_state.last_button_press = None
-        if 'button_clicked_time' not in st.session_state:
-            st.session_state.button_clicked_time = 0.0
-        # Background capture thread + shared frame buffer
-        if 'camera_thread' not in st.session_state:
-            st.session_state.camera_thread = None
-        if 'camera_thread_running' not in st.session_state:
-            st.session_state.camera_thread_running = False
-        if 'latest_frame' not in st.session_state:
-            st.session_state.latest_frame = None
-        if 'last_hands_detected' not in st.session_state:
-            st.session_state.last_hands_detected = False
-
-    def _camera_worker(self):
-        """Background thread: reads frames, processes landmarks, updates shared buffer.
-        Does NOT touch Streamlit UI; safe to run across reruns without restarting camera.
-        """
-        st.session_state.camera_thread_running = True
-        # Make sure camera is initialized
-        cap = self.initialize_camera()
-        if not cap:
-            st.session_state.camera_thread_running = False
-            return
-
-        while st.session_state.camera_thread_running:
-            try:
-                ret, frame = st.session_state.camera.read()
-                if not ret or frame is None:
-                    time.sleep(0.05)
-                    continue
-
-                # Mirror
-                frame = cv2.flip(frame, 1)
-
-                # Process landmarks and draw
-                landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
-
-                # Append to recording buffer when active
-                if st.session_state.is_recording:
-                    st.session_state.recorded_sequence.append(landmarks)
-
-                # Publish latest frame and detection flag
-                st.session_state.latest_frame = annotated_frame
-                st.session_state.last_hands_detected = bool(hands_detected)
-
-                # Throttle a bit
-                time.sleep(0.01)
-            except Exception:
-                # Non-fatal; try to continue
-                time.sleep(0.05)
-                continue
-
-    def ensure_camera_thread(self):
-        """Start background capture thread once and keep it alive across reruns."""
-        if st.session_state.camera_thread is None or not st.session_state.camera_thread.is_alive():
-            # Reset running flag and start thread
-            st.session_state.camera_thread_running = True
-            t = threading.Thread(target=self._camera_worker, name="camera_worker", daemon=True)
-            t.start()
-            st.session_state.camera_thread = t
 
     def initialize_camera(self):
         """Initialize camera capture with retry mechanism"""
@@ -398,29 +336,20 @@ class ISLRecognitionApp:
     
     def start_recording(self):
         """Start recording a new sequence"""
-        print("Debug: Starting recording")  # Debug print
-        if not st.session_state.is_recording:  # Only start if not already recording
-            st.session_state.is_recording = True
-            st.session_state.recorded_sequence = []
-            st.session_state.last_prediction = None
-            st.session_state.last_confidence = 0.0
-            print("Debug: Recording started successfully")  # Debug print
-        else:
-            print("Debug: Start recording called while already recording")  # Debug print
+        st.session_state.is_recording = True
+        st.session_state.recorded_sequence = []
+        st.session_state.last_prediction = None
+        st.session_state.last_confidence = 0.0
     
     def stop_recording(self):
         """Stop recording and predict"""
-        print("Debug: Stopping recording")  # Debug print
-        if st.session_state.is_recording:  # Only stop if currently recording
-            st.session_state.is_recording = False
-            print(f"Debug: Recorded sequence length: {len(st.session_state.recorded_sequence)}")  # Debug print
-            
-            phrase = None  # Initialize phrase to None
-            if len(st.session_state.recorded_sequence) > 0:
-                # Predict the recorded sequence
-                phrase, confidence, all_confidences = self.predict_sequence(
-                    st.session_state.recorded_sequence
-                )
+        st.session_state.is_recording = False
+        
+        if len(st.session_state.recorded_sequence) > 0:
+            # Predict the recorded sequence
+            phrase, confidence, all_confidences = self.predict_sequence(
+                st.session_state.recorded_sequence
+            )
             
             if phrase:
                 st.session_state.last_prediction = phrase
@@ -441,18 +370,18 @@ class ISLRecognitionApp:
     
     def run(self):
         """Run the Streamlit application"""
-        # Initialize camera at startup
-        cap = self.initialize_camera()
-        if not cap:
-            st.error("Camera not available")
-            return
-
         st.set_page_config(
             page_title="ISL Recognition",
             page_icon="🤟",
             layout="wide",
             initial_sidebar_state="expanded"
         )
+        
+        # Initialize camera at startup (after page config)
+        cap = self.initialize_camera()
+        if not cap:
+            st.error("Camera not available")
+            return
         
         st.title("🤟 Indian Sign Language Recognition")
         st.markdown("### Enhanced Model - Manual Recording Control")
@@ -506,50 +435,44 @@ class ISLRecognitionApp:
             # Camera placeholder
             camera_placeholder = st.empty()
             
-            # Control buttons with debug info and state management
-            button_col1, button_col2, button_col3, debug_col = st.columns([1,1,1,2])
+            # Control buttons
+            button_col1, button_col2, button_col3 = st.columns(3)
             
-            # Control buttons - no rerun needed as state changes will automatically update UI
             with button_col1:
-                # Start Recording button
-                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording, key="start_btn"):
-                    print("Debug: Start button clicked")
+                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
+                    # Only update state; avoid immediate rerun to keep UI stable
                     self.start_recording()
             
             with button_col2:
-                # Stop & Predict button
-                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording, key="stop_btn"):
-                    print("Debug: Stop button clicked")
+                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
+                    # Only update state; avoid immediate rerun to keep UI stable
                     self.stop_recording()
             
             with button_col3:
-                # Clear History button
-                if st.button("🔄 Clear History", key="clear_btn"):
+                if st.button("🔄 Clear History"):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
             
-            # Debug information
-            with debug_col:
-                if show_debug:
-                    st.write("🔍 Debug Info:")
-                    st.write(f"Recording State: {st.session_state.is_recording}")
-                    st.write(f"Start Button Disabled: {st.session_state.is_recording}")
-                    st.write(f"Stop Button Disabled: {not st.session_state.is_recording}")
-                    st.write(f"Sequence Length: {len(st.session_state.recorded_sequence)}")
-            
             # Recording status
-            status_placeholder = st.empty()
-            progress_placeholder = st.empty()
-            
             if st.session_state.is_recording:
                 frames_recorded = len(st.session_state.recorded_sequence)
                 cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                status_placeholder.error(
-                    f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)"
-                )
-                progress_placeholder.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
+                
+                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
+                st.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
             else:
-                status_placeholder.info("⚪ Ready - Click 'Start Recording' to begin")
+                st.info("⚪ Ready - Click 'Start Recording' to begin")
+
+            # Optional debug info
+            if show_debug:
+                st.markdown("---")
+                st.markdown("**Debug Info:**")
+                st.write({
+                    "Recording State": st.session_state.is_recording,
+                    "Start Button Disabled": st.session_state.is_recording,
+                    "Stop Button Disabled": not st.session_state.is_recording,
+                    "Sequence Length": len(st.session_state.recorded_sequence),
+                })
         
         with col2:
             st.subheader("🎯 Prediction")
@@ -581,35 +504,65 @@ class ISLRecognitionApp:
                         st.write(f"**Total Frames:** {pred['frames']}")
                         st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
         
-                # Camera feed display (frame provided by background thread)
-        # Ensure background thread is running (once)
-        self.ensure_camera_thread()
-
-        # Display latest frame if available
+                # Camera feed with optimized frame processing
         try:
-            if st.session_state.latest_frame is not None:
-                camera_placeholder.image(
-                    st.session_state.latest_frame,
-                    channels="BGR",
-                    use_container_width=True,
-                    caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
-                )
-            else:
-                camera_placeholder.info("Waiting for camera frame...")
-        except Exception as display_error:
-            st.error(f"Display error: {str(display_error)}")
-
-        # Soft health check: if camera died, try to re-init thread
-        if st.session_state.camera and not st.session_state.camera.isOpened():
-            st.warning("Camera closed unexpectedly. Attempting to recover...")
-            st.session_state.camera_thread_running = False
-            if st.session_state.camera:
+            # Process a small chunk of frames per run to keep the UI responsive
+            for _ in range(20):  # ~20 frames per run (~0.2s at 100fps loop)
+                ret, frame = st.session_state.camera.read()
+                if not ret:
+                    st.error("Failed to get frame from camera")
+                    time.sleep(0.1)
+                    continue
+                
+                frame = cv2.flip(frame, 1)
+                
+                # Process frame
+                landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
+                
+                # Record if active
+                if st.session_state.is_recording:
+                    st.session_state.recorded_sequence.append(landmarks)
+                
+                # Update frame counter
+                st.session_state.frame_count += 1
+                
                 try:
-                    st.session_state.camera.release()
-                except Exception:
-                    pass
+                    # Display frame
+                    camera_placeholder.image(
+                        annotated_frame,
+                        channels="BGR",
+                        use_container_width=True,
+                        caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
+                    )
+                except Exception as display_error:
+                    st.error(f"Display error: {str(display_error)}")
+                    continue
+
+                # Small delay to prevent CPU overload
+                time.sleep(0.01)  # ~10ms delay
+
+                # Lightweight UI update
+                if st.session_state.frame_count % 10 == 0:
+                    st.empty()
+            
+            # After a short burst of frames, trigger a rerun to process UI events/buttons
+            st.rerun()
+                    
+        except Exception as e:
+            st.error(f"Camera error: {str(e)}")
+            # Try to recover camera
+            if st.session_state.camera:
+                st.session_state.camera.release()
             st.session_state.camera = None
-            self.ensure_camera_thread()
+            time.sleep(1)  # Wait before retrying
+            # Try to reinitialize camera
+            self.initialize_camera()
+        finally:
+            if not st.session_state.camera or not st.session_state.camera.isOpened():
+                st.error("Camera disconnected. Please refresh the page.")
+                if st.session_state.camera:
+                    st.session_state.camera.release()
+                    st.session_state.camera = None
 
 
 if __name__ == "__main__":
