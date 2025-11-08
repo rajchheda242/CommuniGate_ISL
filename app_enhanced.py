@@ -14,8 +14,6 @@ import numpy as np
 import joblib
 import json
 import os
-import queue
-import threading
 from PIL import Image
 import time
 from tensorflow.keras.models import load_model
@@ -104,27 +102,6 @@ class HandLandmarkExtractor:
         self.prev_landmarks = frame_landmarks if hands_detected else None
         
         return frame_landmarks, frame, hands_detected
-
-    def process_frame(self, frame):
-        """
-        Process a frame and extract hand landmarks
-        Returns: (landmarks_array, annotated_frame, hands_detected)
-        """
-        # Add frame to queue for processing
-        try:
-            self.frame_queue.put_nowait(frame.copy())
-        except queue.Full:
-            # Queue full, skip this frame
-            pass
-            
-        # Get latest processed result
-        try:
-            result = self.result_queue.get_nowait()
-            return result
-        except queue.Empty:
-            # No result yet, return empty frame
-            return np.zeros(FEATURES_PER_FRAME), frame, False
-
 
 class ISLRecognitionApp:
     """Enhanced Streamlit application for ISL recognition"""
@@ -538,20 +515,24 @@ class ISLRecognitionApp:
                 # Update frame counter
                 st.session_state.frame_count += 1
                 
-                # Display frame
-                camera_placeholder.image(
-                    annotated_frame,
-                    channels="BGR",
-                    use_container_width=True,
-                    caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
-                )
+                try:
+                    # Display frame
+                    camera_placeholder.image(
+                        annotated_frame,
+                        channels="BGR",
+                        use_container_width=True,
+                        caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
+                    )
+                except Exception as display_error:
+                    st.error(f"Display error: {str(display_error)}")
+                    continue
 
-                # Minimal delay to prevent overload
-                time.sleep(0.001)  # 1ms delay
+                # Small delay to prevent CPU overload
+                time.sleep(0.01)  # 10ms delay
 
-                # Update UI every 5 frames
-                if st.session_state.frame_count % 5 == 0:
-                    st.empty().text("")  # Trigger UI update
+                # Lightweight UI update
+                if st.session_state.frame_count % 10 == 0:
+                    st.empty()
                     
         except Exception as e:
             st.error(f"Camera error: {str(e)}")
