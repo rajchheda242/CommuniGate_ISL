@@ -63,7 +63,9 @@ data/processed/*.csv
 htmlcov/
 
 # Streamlit
-.streamlit/
+# Keep config.toml in version control for consistent demo styling.
+# Ignore secrets only.
+.streamlit/secrets.toml
 
 
 # Large video samples (too big to keep in the repository)

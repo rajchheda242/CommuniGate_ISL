@@ -1,0 +1,26 @@
+[theme]
+# CommuniGate ISL Showcase Theme (formal, clean)
+primaryColor = "#4CAF50"            # Accent color
+backgroundColor = "#FFFFFF"          # Main background (white)
+secondaryBackgroundColor = "#F5F5F5" # Panels / sidebar
+textColor = "#262730"                # Dark readable text
+font = "sans serif"
+base = "light"                       # Force light mode for consistency
+
+[server]
+# Formal showcase: run headless so toolbar is hidden
+headless = true
+enableCORS = true
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[browser]
+# Browser settings
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[client]
+# Client settings (minimal toolbar for formal demo)
+showErrorDetails = true
+toolbarMode = "minimal"
