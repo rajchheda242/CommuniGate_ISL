@@ -411,6 +411,44 @@ class ISLRecognitionApp:
             layout="wide",
             initial_sidebar_state="expanded"
         )
+
+        # Trim the default Streamlit top padding so the custom header sits flush at the top
+        st.markdown(
+            """
+            <style>
+                html, body {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                [data-testid="stAppViewContainer"] {
+                    padding-top: 0 !important;
+                }
+                [data-testid="stAppViewContainer"] > .main {
+                    padding-top: 0 !important;
+                    margin-top: 0 !important;
+                }
+                [data-testid="stAppViewContainer"] > .main .block-container {
+                    padding-top: 0 !important;
+                    margin-top: 0 !important;
+                }
+                [data-testid="stHeader"] {
+                    display: none;
+                }
+                [data-testid="stApp"] > div:first-child {
+                    padding-top: 0 !important;
+                    margin-top: 0 !important;
+                }
+                .block-container > div:first-child {
+                    padding-top: 0 !important;
+                    margin-top: 0 !important;
+                }
+                .block-container h1:first-child {
+                    margin-top: 0;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         
         # Header with logo and title side-by-side (robust file search + fallback)
         def _find_logo():
@@ -438,7 +476,7 @@ class ISLRecognitionApp:
             else:
                 st.caption("(Logo missing – place file at src/ui/assets/logo.png or root as logo.png)")
         with header_col2:
-            st.markdown("<h1 style='margin-bottom:0;'>🤟 Indian Sign Language Recognition</h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='margin-bottom:0;'>Indian Sign Language Recognition</h1>", unsafe_allow_html=True)
             st.markdown("<div style='color:#6c757d;'>Enhanced Model - Manual Recording Control</div>", unsafe_allow_html=True)
         
         # Sidebar
