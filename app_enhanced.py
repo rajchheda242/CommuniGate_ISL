@@ -164,18 +164,47 @@ class ISLRecognitionApp:
             st.session_state.frame_count = 0
 
     def initialize_camera(self):
-        """Initialize camera capture"""
-        if not st.session_state.camera:
-            cap = cv2.VideoCapture(0)
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            if cap.isOpened():
-                st.session_state.camera = cap
-            else:
-                st.error("Failed to initialize camera")
-                return None
-        return st.session_state.camera
+        """Initialize camera capture with retry mechanism"""
+        # If camera exists and is working, return it
+        if st.session_state.camera and st.session_state.camera.isOpened():
+            ret, _ = st.session_state.camera.read()
+            if ret:
+                return st.session_state.camera
+        
+        # Release existing camera if it's not working
+        if st.session_state.camera:
+            st.session_state.camera.release()
+            st.session_state.camera = None
+        
+        # Try to initialize camera with retries
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                cap = cv2.VideoCapture(0)
+                if not cap.isOpened():
+                    continue
+                
+                # Configure camera
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
+                
+                # Test camera
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    st.session_state.camera = cap
+                    return cap
+                else:
+                    cap.release()
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    st.error(f"Camera initialization failed: {str(e)}")
+            
+            time.sleep(1)  # Wait before retry
+        
+        st.error("Failed to initialize camera after multiple attempts")
+        return None
     
     def load_model_and_scaler(self):
         """Load the trained model, scaler, and phrase mapping"""
@@ -506,27 +535,39 @@ class ISLRecognitionApp:
                 if st.session_state.is_recording:
                     st.session_state.recorded_sequence.append(landmarks)
                 
-                # Update frame counter and rerun if needed
+                # Update frame counter
                 st.session_state.frame_count += 1
-                if st.session_state.frame_count % 30 == 0:  # Force update every 30 frames
-                    st.experimental_rerun()
                 
                 # Display frame
                 camera_placeholder.image(
                     annotated_frame,
                     channels="BGR",
-                    use_column_width=True,
+                    use_container_width=True,
                     caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
                 )
 
                 # Small delay to prevent overloading
                 time.sleep(0.01)  # 10ms delay between frames
+
+                # Update UI periodically without using rerun
+                if st.session_state.frame_count % 30 == 0:
+                    st.empty().text("")  # Trigger UI update
+                    
         except Exception as e:
             st.error(f"Camera error: {str(e)}")
-            time.sleep(0.1)
-        finally:
+            # Try to recover camera
             if st.session_state.camera:
                 st.session_state.camera.release()
+            st.session_state.camera = None
+            time.sleep(1)  # Wait before retrying
+            # Try to reinitialize camera
+            self.initialize_camera()
+        finally:
+            if not st.session_state.camera or not st.session_state.camera.isOpened():
+                st.error("Camera disconnected. Please refresh the page.")
+                if st.session_state.camera:
+                    st.session_state.camera.release()
+                    st.session_state.camera = None
 
 
 if __name__ == "__main__":
