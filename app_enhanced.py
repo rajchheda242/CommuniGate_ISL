@@ -450,36 +450,24 @@ class ISLRecognitionApp:
             # Control buttons with debug info and state management
             button_col1, button_col2, button_col3, debug_col = st.columns([1,1,1,2])
             
-            current_time = time.time()
-            
-            def can_click_button():
-                """Check if enough time has passed since last button click"""
-                if 'last_click_time' not in st.session_state:
-                    st.session_state.last_click_time = 0
-                return (current_time - st.session_state.last_click_time) > 1.0
-            
+            # Control buttons - no rerun needed as state changes will automatically update UI
             with button_col1:
+                # Start Recording button
                 if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording, key="start_btn"):
-                    if can_click_button() and not st.session_state.is_recording:
-                        st.session_state.last_click_time = current_time
-                        print("Debug: Start button clicked and validated")
-                        self.start_recording()
-                        st.experimental_rerun()
+                    print("Debug: Start button clicked")
+                    self.start_recording()
             
             with button_col2:
+                # Stop & Predict button
                 if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording, key="stop_btn"):
-                    if can_click_button() and st.session_state.is_recording:
-                        st.session_state.last_click_time = current_time
-                        print("Debug: Stop button clicked and validated")
-                        self.stop_recording()
-                        st.experimental_rerun()
+                    print("Debug: Stop button clicked")
+                    self.stop_recording()
             
             with button_col3:
+                # Clear History button
                 if st.button("🔄 Clear History", key="clear_btn"):
-                    if can_click_button():
-                        st.session_state.last_click_time = current_time
-                        st.session_state.prediction_history = []
-                        st.session_state.last_prediction = None
+                    st.session_state.prediction_history = []
+                    st.session_state.last_prediction = None
             
             # Debug information
             with debug_col:
