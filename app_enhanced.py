@@ -139,6 +139,10 @@ class ISLRecognitionApp:
             st.session_state.camera = None
         if 'frame_count' not in st.session_state:
             st.session_state.frame_count = 0
+        if 'last_button_press' not in st.session_state:
+            st.session_state.last_button_press = None
+        if 'button_clicked_time' not in st.session_state:
+            st.session_state.button_clicked_time = 0.0
 
     def initialize_camera(self):
         """Initialize camera capture with retry mechanism"""
@@ -443,23 +447,32 @@ class ISLRecognitionApp:
             # Camera placeholder
             camera_placeholder = st.empty()
             
-            # Control buttons with debug info
+            # Control buttons with debug info and state management
             button_col1, button_col2, button_col3, debug_col = st.columns([1,1,1,2])
             
+            # Add button state tracking to session state
+            if 'last_button_press' not in st.session_state:
+                st.session_state.last_button_press = None
+            
             with button_col1:
-                start_clicked = st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording)
-                if start_clicked:
+                start_disabled = st.session_state.is_recording
+                start_clicked = st.button("🎬 Start Recording", type="primary", disabled=start_disabled, key="start_btn")
+                if start_clicked and not start_disabled and st.session_state.last_button_press != "start":
                     st.info("Debug: Start button clicked")
+                    st.session_state.last_button_press = "start"
                     self.start_recording()
             
             with button_col2:
-                stop_clicked = st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording)
-                if stop_clicked:
+                stop_disabled = not st.session_state.is_recording
+                stop_clicked = st.button("⏹️ Stop & Predict", type="secondary", disabled=stop_disabled, key="stop_btn")
+                if stop_clicked and not stop_disabled and st.session_state.last_button_press != "stop":
                     st.info("Debug: Stop button clicked")
+                    st.session_state.last_button_press = "stop"
                     self.stop_recording()
             
             with button_col3:
-                if st.button("🔄 Clear History"):
+                clear_clicked = st.button("🔄 Clear History", key="clear_btn")
+                if clear_clicked:
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
             
