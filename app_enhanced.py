@@ -21,6 +21,32 @@ from datetime import datetime
 import mediapipe as mp
 import threading
 
+# Streamlit compatibility helpers
+def _get_cache_resource():
+    """Return a caching decorator compatible with the installed Streamlit version."""
+    if hasattr(st, "cache_resource"):
+        return st.cache_resource
+    if hasattr(st, "experimental_singleton"):
+        return st.experimental_singleton
+    # Fallback: identity decorator that accepts optional kwargs
+    def _identity_decorator(func=None, **kwargs):
+        if func is None:
+            def _wrap(f):
+                return f
+            return _wrap
+        return func
+    return _identity_decorator
+
+CACHE_RESOURCE = _get_cache_resource()
+
+
+def _safe_rerun():
+    """Rerun script using available Streamlit API without breaking on versions."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
 # Try to import text-to-speech (optional)
 try:
     import pyttsx3
@@ -130,60 +156,12 @@ class ISLRecognitionApp:
         if 'enable_tts' not in st.session_state:
             st.session_state.enable_tts = TTS_AVAILABLE
     
-    @st.cache_resource(show_spinner=True)
-    def _load_resources(self):
-        """Load and return (model, scaler, phrase_mapping). Cached across reruns."""
-        model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
-        if not os.path.exists(model_path):
-            model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
-        
-        scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
-        mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
-        
-        # Check if files exist
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-        
-        if not os.path.exists(scaler_path):
-            raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
-        
-        if not os.path.exists(mapping_path):
-            raise FileNotFoundError(f"Phrase mapping not found: {mapping_path}")
-        
-        try:
-            # Load model with compatibility settings
-            model = load_model(model_path, compile=False, safe_mode=False)
-            # No need to compile for inference
-            
-        except (ValueError, OSError) as e:
-            error_msg = str(e)
-            if "expected" in error_msg.lower() and "variables" in error_msg.lower():
-                raise RuntimeError(
-                    "Model compatibility error. The model may have been trained on a different system. "
-                    f"Details: {error_msg}"
-                )
-            else:
-                raise
-        
-        try:
-            # Load scaler
-            scaler = joblib.load(scaler_path)
-            
-            # Load phrase mapping and invert it (file has phrase->id, we need id->phrase)
-            with open(mapping_path, 'r') as f:
-                phrase_to_id = json.load(f)
-                # Invert the mapping: id -> phrase
-                phrase_mapping = {v: k for k, v in phrase_to_id.items()}
-                
-        except Exception as e:
-            raise RuntimeError(f"Error loading scaler/mapping: {e}")
-
-        return model, scaler, phrase_mapping
+    
 
     def load_model_and_scaler(self):
         """Load the trained model, scaler, and phrase mapping (cached)."""
         try:
-            self.model, self.scaler, self.phrase_mapping = self._load_resources()
+            self.model, self.scaler, self.phrase_mapping = load_resources_cached()
             st.success("✅ Model, scaler, and phrase mapping loaded (cached)")
             st.info(f"Sequence Length: {SEQUENCE_LENGTH} • Features/Frame: {FEATURES_PER_FRAME}")
         except FileNotFoundError as e:
@@ -558,3 +536,40 @@ class VideoProcessor:
 if __name__ == "__main__":
     app = ISLRecognitionApp()
     app.run()
+
+
+# Cached resource loader (module level so decorator applies once)
+@CACHE_RESOURCE(show_spinner=True)
+def load_resources_cached():
+    """Return (model, scaler, phrase_mapping) with version-independent caching."""
+    model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
+    if not os.path.exists(model_path):
+        model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
+
+    scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
+    mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
+    if not os.path.exists(mapping_path):
+        raise FileNotFoundError(f"Phrase mapping not found: {mapping_path}")
+
+    try:
+        model = load_model(model_path, compile=False, safe_mode=False)
+    except (ValueError, OSError) as e:
+        error_msg = str(e)
+        if "expected" in error_msg.lower() and "variables" in error_msg.lower():
+            raise RuntimeError("Model compatibility error: " + error_msg)
+        raise
+
+    try:
+        scaler = joblib.load(scaler_path)
+        with open(mapping_path, 'r') as f:
+            phrase_to_id = json.load(f)
+        phrase_mapping = {v: k for k, v in phrase_to_id.items()}
+    except Exception as e:
+        raise RuntimeError(f"Error loading scaler/mapping: {e}")
+
+    return model, scaler, phrase_mapping
