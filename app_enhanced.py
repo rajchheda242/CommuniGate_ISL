@@ -33,40 +33,28 @@ except ImportError:
 MODEL_DIR = "models/saved"
 SEQUENCE_LENGTH = 90  # Model expects 90 frames
 FEATURES_PER_FRAME = 126  # 2 hands × 21 landmarks × 3 coords
-MIN_DETECTION_CONFIDENCE = 0.7  # Increased for more stable detection
-MIN_TRACKING_CONFIDENCE = 0.7  # Increased for better tracking
-SMOOTHING_FACTOR = 0.5  # Landmark smoothing factor (0-1)
+MIN_DETECTION_CONFIDENCE = 0.5  # Lower threshold for better detection
+MIN_TRACKING_CONFIDENCE = 0.5  # Lower threshold for smoother tracking
+SMOOTHING_FACTOR = 0.2  # Light smoothing to maintain responsiveness
 
 
 class HandLandmarkExtractor:
-    """Extract hand landmarks using MediaPipe with smoothing"""
+    """Extract hand landmarks using MediaPipe with minimal processing"""
     
     def __init__(self):
         self.mp_hands = mp.solutions.hands
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
-        # Create hands object in thread-safe way with refined parameters
+        # Create hands object with optimized parameters
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=2,
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
-            model_complexity=1  # Use more accurate model
+            model_complexity=0  # Use faster model
         )
-        # Initialize frame processing queue with larger buffer
-        self.frame_queue = queue.Queue(maxsize=4)  # Increased buffer size
-        self.result_queue = queue.Queue(maxsize=4)
-        self.is_running = True
-        
-        # Initialize smoothing buffers
+        # Simple smoothing buffer
         self.prev_landmarks = None
-        self.smoothing_buffer = []
-        self.buffer_size = 5  # Number of frames to average
-        
-        # Start processing thread
-        self.process_thread = threading.Thread(target=self._process_frames_thread)
-        self.process_thread.daemon = True
-        self.process_thread.start()
     
     def extract_landmarks(self, hand_landmarks):
         """Extract landmark coordinates from Mediapipe results."""
@@ -75,62 +63,35 @@ class HandLandmarkExtractor:
             landmarks.extend([landmark.x, landmark.y, landmark.z])
         return landmarks
     
-    def _process_frames_thread(self):
-        """Background thread for processing frames"""
-        while self.is_running:
-            try:
-                frame = self.frame_queue.get(timeout=0.1)
-                result = self._process_single_frame(frame)
-                self.result_queue.put(result)
-            except queue.Empty:
-                continue
-
-    def smooth_landmarks(self, current_landmarks, prev_landmarks=None):
-        """Apply exponential smoothing to landmarks"""
-        if prev_landmarks is None or np.all(prev_landmarks == 0):
-            return current_landmarks
-            
-        return SMOOTHING_FACTOR * current_landmarks + (1 - SMOOTHING_FACTOR) * prev_landmarks
-    
-    def _process_single_frame(self, frame):
-        """Process a single frame and return results with smoothing"""
+    def process_frame(self, frame):
+        """Process a frame and extract hand landmarks with minimal processing"""
+        # Convert to RGB
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Process frame with MediaPipe
         results = self.hands.process(rgb_frame)
         
-        # Initialize landmarks array (126 features: 2 hands × 21 landmarks × 3 coords)
+        # Initialize landmarks array
         frame_landmarks = np.zeros(FEATURES_PER_FRAME)
         hands_detected = False
         
         if results.multi_hand_landmarks:
             hands_detected = True
             for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                if idx < 2:
-                    # Extract raw landmarks
+                if idx < 2:  # Process up to 2 hands
+                    # Extract landmarks
                     landmarks = self.extract_landmarks(hand_landmarks)
                     start_idx = idx * len(landmarks)
+                    frame_landmarks[start_idx:start_idx + len(landmarks)] = landmarks
                     
-                    # Get previous landmarks for this hand
-                    prev_hand_landmarks = None
+                    # Simple smoothing if we have previous landmarks
                     if self.prev_landmarks is not None:
-                        prev_hand_landmarks = self.prev_landmarks[start_idx:start_idx + len(landmarks)]
-                    
-                    # Apply smoothing
-                    smoothed_landmarks = self.smooth_landmarks(
-                        np.array(landmarks), 
-                        prev_hand_landmarks
-                    )
-                    
-                    # Store smoothed landmarks
-                    frame_landmarks[start_idx:start_idx + len(landmarks)] = smoothed_landmarks
-                    
-                    # Update hand_landmarks for drawing
-                    for i, landmark in enumerate(hand_landmarks.landmark):
-                        landmark_idx = i * 3
-                        landmark.x = smoothed_landmarks[landmark_idx]
-                        landmark.y = smoothed_landmarks[landmark_idx + 1]
-                        landmark.z = smoothed_landmarks[landmark_idx + 2]
+                        prev_section = self.prev_landmarks[start_idx:start_idx + len(landmarks)]
+                        frame_landmarks[start_idx:start_idx + len(landmarks)] = \
+                            SMOOTHING_FACTOR * np.array(landmarks) + \
+                            (1 - SMOOTHING_FACTOR) * prev_section
                 
-                # Draw landmarks with thicker lines for better visibility
+                # Draw landmarks
                 self.mp_drawing.draw_landmarks(
                     frame,
                     hand_landmarks,
@@ -141,16 +102,6 @@ class HandLandmarkExtractor:
         
         # Update previous landmarks
         self.prev_landmarks = frame_landmarks if hands_detected else None
-        
-        # Apply temporal smoothing using buffer
-        if hands_detected:
-            self.smoothing_buffer.append(frame_landmarks)
-            if len(self.smoothing_buffer) > self.buffer_size:
-                self.smoothing_buffer.pop(0)
-            if len(self.smoothing_buffer) > 1:
-                frame_landmarks = np.mean(self.smoothing_buffer, axis=0)
-        else:
-            self.smoothing_buffer.clear()
         
         return frame_landmarks, frame, hands_detected
 
@@ -595,15 +546,11 @@ class ISLRecognitionApp:
                     caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
                 )
 
-                # Adaptive frame delay based on processing time
-                frame_time = time.time()
-                processing_time = frame_time - st.session_state.get('last_frame_time', frame_time)
-                delay = max(0.01, 0.033 - processing_time)  # Target 30 FPS
-                time.sleep(delay)
-                st.session_state.last_frame_time = frame_time
+                # Minimal delay to prevent overload
+                time.sleep(0.001)  # 1ms delay
 
-                # Update UI periodically without using rerun
-                if st.session_state.frame_count % 30 == 0:
+                # Update UI every 5 frames
+                if st.session_state.frame_count % 5 == 0:
                     st.empty().text("")  # Trigger UI update
                     
         except Exception as e:
