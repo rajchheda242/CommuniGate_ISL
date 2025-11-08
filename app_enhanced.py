@@ -316,6 +316,145 @@ class ISLRecognitionApp:
                 if TTS_AVAILABLE:
                     self.speak(phrase)
 
+    def run(self):
+        """Render the Streamlit UI (non-blocking; camera runs in background thread)."""
+        st.set_page_config(
+            page_title="ISL Recognition",
+            page_icon="🤟",
+            layout="wide"
+        )
+
+        st.title("🤟 Indian Sign Language Recognition")
+        st.markdown("### Enhanced Model - Manual Recording Control")
+
+        # Sidebar
+        with st.sidebar:
+            st.header("ℹ️ Instructions")
+            st.markdown("""
+            **How to use:**
+            1. Click **Start Recording** 
+            2. Perform the ISL phrase
+            3. Click **Stop & Predict**
+            4. View prediction results
+            
+            **Supported Phrases:**
+            - Hi my name is Reet
+            - How are you
+            - I am from Delhi
+            - I like coffee
+            - What do you like
+            
+            **Tips:**
+            - Keep hands visible in frame
+            - Perform gesture at natural speed
+            - Good lighting helps accuracy
+            - Plain background is best
+            """)
+
+            st.markdown("---")
+
+            # Settings
+            st.header("⚙️ Settings")
+            st.session_state.enable_tts = st.checkbox(
+                "Enable Text-to-Speech", value=st.session_state.get("enable_tts", TTS_AVAILABLE)
+            )
+            auto_refresh = st.checkbox("Auto-refresh camera", value=True, help="Updates camera frames in short loop")
+            show_debug = st.checkbox("Show Debug Info", value=False)
+
+            st.markdown("---")
+
+            # Model info
+            st.header("📊 Model Info")
+            if self.model:
+                st.success("✅ Model Loaded")
+                st.info(f"Sequence Length: {SEQUENCE_LENGTH} frames")
+                st.info(f"Features: {FEATURES_PER_FRAME} per frame")
+
+        # Main content
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            st.subheader("📹 Camera Feed")
+            camera_placeholder = st.empty()
+
+            # Start video processor if not already running
+            if st.session_state.video_processor is None:
+                st.session_state.video_processor = VideoProcessor(self.extractor)
+                st.session_state.video_processor.start()
+
+            # Controls
+            b1, b2, b3 = st.columns(3)
+            with b1:
+                if st.button("🎬 Start Recording", disabled=st.session_state.is_recording):
+                    self.start_recording()
+            with b2:
+                if st.button("⏹️ Stop & Predict", disabled=not st.session_state.is_recording):
+                    self.stop_recording()
+            with b3:
+                if st.button("🔄 Clear History"):
+                    st.session_state.prediction_history = []
+                    st.session_state.last_prediction = None
+
+            # Status
+            if st.session_state.is_recording:
+                frames_recorded = len(st.session_state.recorded_sequence)
+                cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
+                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} valid)")
+                st.progress(min(frames_recorded / 150, 1.0))
+            else:
+                st.info("⚪ Ready - Click 'Start Recording' to begin")
+
+            # Display current frame (with optional short refresh loop)
+            if auto_refresh:
+                for _ in range(40):  # ~1.2s of updates
+                    frame = st.session_state.get('latest_frame')
+                    if frame is not None:
+                        camera_placeholder.image(frame, channels="RGB", use_container_width=True)
+                    time.sleep(0.03)
+                # Trigger a lightweight rerun to keep frames updating without restarting camera
+                st.experimental_rerun()
+            else:
+                frame = st.session_state.get('latest_frame')
+                if frame is not None:
+                    camera_placeholder.image(frame, channels="RGB", use_container_width=True)
+                else:
+                    st.warning("Waiting for camera...")
+
+        with col2:
+            st.subheader("🎯 Prediction")
+            if st.session_state.last_prediction:
+                st.success(f"**Phrase:** {st.session_state.last_prediction}")
+                st.metric("Confidence", f"{st.session_state.last_confidence:.1f}%")
+                if st.session_state.last_confidence >= 90:
+                    st.success("🎉 Excellent confidence!")
+                elif st.session_state.last_confidence >= 70:
+                    st.info("👍 Good confidence")
+                else:
+                    st.warning("⚠️ Low confidence - try again")
+            else:
+                st.info("No prediction yet")
+
+            if st.session_state.prediction_history:
+                st.markdown("---")
+                st.subheader("📜 Recent Predictions")
+                for i, pred in enumerate(reversed(st.session_state.prediction_history[-5:])):
+                    with st.expander(f"{pred['timestamp']} - {pred['phrase']}", expanded=(i == 0)):
+                        st.write(f"**Phrase:** {pred['phrase']}")
+                        st.write(f"**Confidence:** {pred['confidence']:.1f}%")
+                        st.write(f"**Total Frames:** {pred['frames']}")
+                        st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
+
+        # Optional debug section
+        if show_debug:
+            st.markdown("---")
+            st.subheader("🛠 Debug Info")
+            st.write({
+                'recording': st.session_state.is_recording,
+                'frames_collected': len(st.session_state.recorded_sequence),
+                'latest_frame_available': st.session_state.latest_frame is not None,
+                'hands_detected': st.session_state.hands_detected,
+            })
+
 
 class VideoProcessor:
     """Background video capture and processing to keep camera alive across reruns."""
@@ -414,141 +553,6 @@ class VideoProcessor:
         if self.cap:
             self.cap.release()
     
-    def run(self):
-        """Run the Streamlit application"""
-        st.set_page_config(
-            page_title="ISL Recognition",
-            page_icon="🤟",
-            layout="wide"
-        )
-        
-        st.title("🤟 Indian Sign Language Recognition")
-        st.markdown("### Enhanced Model - Manual Recording Control")
-        
-        # Sidebar
-        with st.sidebar:
-            st.header("ℹ️ Instructions")
-            st.markdown("""
-            **How to use:**
-            1. Click **Start Recording** 
-            2. Perform the ISL phrase
-            3. Click **Stop & Predict**
-            4. View prediction results
-            
-            **Supported Phrases:**
-            - Hi my name is Reet
-            - How are you
-            - I am from Delhi
-            - I like coffee
-            - What do you like
-            
-            **Tips:**
-            - Keep hands visible in frame
-            - Perform gesture at natural speed
-            - Good lighting helps accuracy
-            - Plain background is best
-            """)
-            
-            st.markdown("---")
-            
-            # Settings
-            st.header("⚙️ Settings")
-            st.session_state.enable_tts = st.checkbox(
-                "Enable Text-to-Speech", value=st.session_state.get("enable_tts", TTS_AVAILABLE)
-            )
-            show_debug = st.checkbox("Show Debug Info", value=False)
-            
-            st.markdown("---")
-            
-            # Model info
-            st.header("📊 Model Info")
-            if self.model:
-                st.success("✅ Model Loaded")
-                st.info(f"Sequence Length: {SEQUENCE_LENGTH} frames")
-                st.info(f"Features: {FEATURES_PER_FRAME} per frame")
-        
-        # Main content - two columns
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.subheader("📹 Camera Feed")
-            
-            # Camera placeholder
-            camera_placeholder = st.empty()
-            
-            # Ensure background video processor is running and persistent
-            if st.session_state.video_processor is None:
-                st.session_state.video_processor = VideoProcessor(self.extractor)
-                st.session_state.video_processor.start()
-            
-            # Control buttons
-            button_col1, button_col2, button_col3 = st.columns(3)
-            
-            with button_col1:
-                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
-                    self.start_recording()
-            
-            with button_col2:
-                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
-                    self.stop_recording()
-            
-            with button_col3:
-                if st.button("🔄 Clear History"):
-                    st.session_state.prediction_history = []
-                    st.session_state.last_prediction = None
-            
-            # Recording status
-            if st.session_state.is_recording:
-                frames_recorded = len(st.session_state.recorded_sequence)
-                cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                
-                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
-                st.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
-            else:
-                st.info("⚪ Ready - Click 'Start Recording' to begin")
-            
-            # Display loop for camera frames (uses background thread output)
-            frame_count = 0
-            while True:
-                frame = st.session_state.get('latest_frame')
-                if frame is not None:
-                    frame_count += 1
-                    # Update only every 2 frames to reduce UI load
-                    if frame_count % 2 == 0:
-                        camera_placeholder.image(frame, channels="RGB", use_container_width=True)
-                time.sleep(0.03)
-        
-        with col2:
-            st.subheader("🎯 Prediction")
-            
-            # Current prediction
-            if st.session_state.last_prediction:
-                st.success(f"**Phrase:** {st.session_state.last_prediction}")
-                st.metric("Confidence", f"{st.session_state.last_confidence:.1f}%")
-                
-                # Confidence indicator
-                if st.session_state.last_confidence >= 90:
-                    st.success("🎉 Excellent confidence!")
-                elif st.session_state.last_confidence >= 70:
-                    st.info("👍 Good confidence")
-                else:
-                    st.warning("⚠️ Low confidence - try again")
-            else:
-                st.info("No prediction yet")
-            
-            # Prediction history
-            if st.session_state.prediction_history:
-                st.markdown("---")
-                st.subheader("📜 Recent Predictions")
-                
-                for i, pred in enumerate(reversed(st.session_state.prediction_history[-5:])):
-                    with st.expander(f"{pred['timestamp']} - {pred['phrase']}", expanded=(i==0)):
-                        st.write(f"**Phrase:** {pred['phrase']}")
-                        st.write(f"**Confidence:** {pred['confidence']:.1f}%")
-                        st.write(f"**Total Frames:** {pred['frames']}")
-                        st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
-        
-        # Note: Camera lifecycle is managed by VideoProcessor; it persists across reruns
 
 
 if __name__ == "__main__":
