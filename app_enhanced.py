@@ -19,8 +19,6 @@ import time
 from tensorflow.keras.models import load_model
 from datetime import datetime
 import mediapipe as mp
-import threading
-from io import BytesIO
 
 # Try to import text-to-speech (optional)
 try:
@@ -36,14 +34,6 @@ FEATURES_PER_FRAME = 126  # 2 hands × 21 landmarks × 3 coords
 MIN_DETECTION_CONFIDENCE = 0.5  # Lower threshold for better detection
 MIN_TRACKING_CONFIDENCE = 0.5  # Lower threshold for smoother tracking
 SMOOTHING_FACTOR = 0.2  # Light smoothing to maintain responsiveness
-
-# Globals for background video thread and recording buffer
-VIDEO_THREAD = None
-VIDEO_THREAD_RUNNING = False
-LATEST_FRAME_BYTES = None
-RECORDED_BUFFER = []
-REC_LOCK = threading.Lock()
-RECORDING_FLAG = False
 
 
 class HandLandmarkExtractor:
@@ -153,9 +143,6 @@ class ISLRecognitionApp:
             st.session_state.last_button_press = None
         if 'button_clicked_time' not in st.session_state:
             st.session_state.button_clicked_time = 0.0
-        # Ensure there is a place to store the final copied recorded sequence
-        if 'recorded_sequence' not in st.session_state:
-            st.session_state.recorded_sequence = []
 
     def initialize_camera(self):
         """Initialize camera capture with retry mechanism"""
@@ -270,71 +257,6 @@ class ISLRecognitionApp:
             self.tts_engine.setProperty('rate', 150)
         except:
             self.tts_engine = None
-
-    def start_video_thread(self):
-        """Start a background thread that captures frames continuously."""
-        global VIDEO_THREAD, VIDEO_THREAD_RUNNING
-
-        if VIDEO_THREAD_RUNNING:
-            return
-
-        VIDEO_THREAD_RUNNING = True
-        VIDEO_THREAD = threading.Thread(target=self._video_loop, daemon=True)
-        VIDEO_THREAD.start()
-
-    def _video_loop(self):
-        """Background thread loop: open camera, read frames, process and store latest bytes."""
-        global VIDEO_THREAD_RUNNING, LATEST_FRAME_BYTES, RECORDED_BUFFER, RECORDING_FLAG
-
-        try:
-            cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                print("Debug: Background thread failed to open camera")
-                VIDEO_THREAD_RUNNING = False
-                return
-
-            # Configure camera for low latency
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-            while VIDEO_THREAD_RUNNING:
-                ret, frame = cap.read()
-                if not ret or frame is None:
-                    time.sleep(0.05)
-                    continue
-
-                frame = cv2.flip(frame, 1)
-
-                # Process frame (annotated and landmarks)
-                landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
-
-                # Encode annotated frame to JPEG bytes for fast transfer to main thread
-                try:
-                    success, buf = cv2.imencode('.jpg', annotated_frame)
-                    if success:
-                        with REC_LOCK:
-                            LATEST_FRAME_BYTES = buf.tobytes()
-                except Exception as e:
-                    print(f"Debug: Error encoding frame: {e}")
-
-                # Append landmarks to shared buffer if recording flag is set
-                if RECORDING_FLAG:
-                    with REC_LOCK:
-                        RECORDED_BUFFER.append(landmarks)
-
-                # small sleep to yield
-                time.sleep(0.01)
-
-        except Exception as e:
-            print(f"Debug: Video thread error: {e}")
-        finally:
-            try:
-                cap.release()
-            except Exception:
-                pass
-            VIDEO_THREAD_RUNNING = False
     
     def speak(self, text):
         """Speak the predicted phrase"""
@@ -418,58 +340,54 @@ class ISLRecognitionApp:
     
     def start_recording(self):
         """Start recording a new sequence"""
-        global RECORDED_BUFFER, RECORDING_FLAG
         print("Debug: Starting recording")  # Debug print
-        if not st.session_state.is_recording:
-            # Clear shared buffer and set recording flag used by background thread
-            with REC_LOCK:
-                RECORDED_BUFFER = []
-            RECORDING_FLAG = True
+        if not st.session_state.is_recording:  # Only start if not already recording
             st.session_state.is_recording = True
+            st.session_state.recorded_sequence = []
             st.session_state.last_prediction = None
             st.session_state.last_confidence = 0.0
-            print("Debug: Recording started successfully")
+            print("Debug: Recording started successfully")  # Debug print
         else:
-            print("Debug: Start recording called while already recording")
+            print("Debug: Start recording called while already recording")  # Debug print
     
     def stop_recording(self):
         """Stop recording and predict"""
-        global RECORDED_BUFFER, RECORDING_FLAG
-        print("Debug: Stopping recording")
-        if st.session_state.is_recording:
-            # Turn off recording flag so background thread stops appending
-            RECORDING_FLAG = False
+        print("Debug: Stopping recording")  # Debug print
+        if st.session_state.is_recording:  # Only stop if currently recording
             st.session_state.is_recording = False
-
-            # Copy recorded frames from shared buffer into session_state for prediction
-            with REC_LOCK:
-                copied = RECORDED_BUFFER.copy()
-            st.session_state.recorded_sequence = copied
-            print(f"Debug: Copied recorded sequence length: {len(copied)}")
-
+            print(f"Debug: Recorded sequence length: {len(st.session_state.recorded_sequence)}")  # Debug print
+            
+            phrase = None  # Initialize phrase to None
             if len(st.session_state.recorded_sequence) > 0:
+                # Predict the recorded sequence
                 phrase, confidence, all_confidences = self.predict_sequence(
                     st.session_state.recorded_sequence
                 )
-
-                if phrase:
-                    st.session_state.last_prediction = phrase
-                    st.session_state.last_confidence = confidence
-                    # Add to history
-                    st.session_state.prediction_history.append({
-                        'phrase': phrase,
-                        'confidence': confidence,
-                        'timestamp': datetime.now().strftime('%H:%M:%S'),
-                        'frames': len(st.session_state.recorded_sequence),
-                        'cleaned_frames': len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                    })
-                    if TTS_AVAILABLE:
-                        self.speak(phrase)
+            
+            if phrase:
+                st.session_state.last_prediction = phrase
+                st.session_state.last_confidence = confidence
+                
+                # Add to history
+                st.session_state.prediction_history.append({
+                    'phrase': phrase,
+                    'confidence': confidence,
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'frames': len(st.session_state.recorded_sequence),
+                    'cleaned_frames': len(self.remove_blank_frames(st.session_state.recorded_sequence))
+                })
+                
+                # Speak the prediction
+                if TTS_AVAILABLE:
+                    self.speak(phrase)
     
     def run(self):
         """Run the Streamlit application"""
-        # Start background video thread (keeps camera open across reruns)
-        self.start_video_thread()
+        # Initialize camera at startup
+        cap = self.initialize_camera()
+        if not cap:
+            st.error("Camera not available")
+            return
 
         st.set_page_config(
             page_title="ISL Recognition",
@@ -561,34 +479,14 @@ class ISLRecognitionApp:
                     st.write(f"Stop Button Disabled: {not st.session_state.is_recording}")
                     st.write(f"Sequence Length: {len(st.session_state.recorded_sequence)}")
             
-            # Recording status and live frame display (reads from background thread)
+            # Recording status
             status_placeholder = st.empty()
             progress_placeholder = st.empty()
-
-            # Display latest frame from background thread
-            global LATEST_FRAME_BYTES
-            frame_displayed = False
-            with REC_LOCK:
-                latest = LATEST_FRAME_BYTES
-
-            if latest is not None:
-                try:
-                    img = Image.open(BytesIO(latest))
-                    camera_placeholder.image(img, use_column_width=True, caption=("Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"))
-                    frame_displayed = True
-                except Exception as e:
-                    # If decoding fails, ignore and continue
-                    print(f"Debug: Failed to decode latest frame: {e}")
-
-            if not frame_displayed:
-                camera_placeholder.text("Waiting for camera...")
-
+            
             if st.session_state.is_recording:
-                # Show counts based on shared buffer length for more immediate feedback
-                with REC_LOCK:
-                    frames_recorded = len(RECORDED_BUFFER)
-                    cleaned_frames = len(self.remove_blank_frames(RECORDED_BUFFER))
-
+                frames_recorded = len(st.session_state.recorded_sequence)
+                cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
+                
                 status_placeholder.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
                 progress_placeholder.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
             else:
@@ -626,13 +524,43 @@ class ISLRecognitionApp:
         
                 # Camera feed with optimized frame processing
         try:
-            # The background video thread handles continuous capture. In the main thread
-            # we simply keep the script alive; Streamlit will rerun the script on
-            # user interactions (buttons, checkboxes). Use a short sleep here so the
-            # script doesn't busy-wait. This loop will be interrupted by Streamlit
-            # reruns when widgets are used.
             while True:
-                time.sleep(0.5)
+                ret, frame = st.session_state.camera.read()
+                if not ret:
+                    st.error("Failed to get frame from camera")
+                    time.sleep(0.1)
+                    continue
+                
+                frame = cv2.flip(frame, 1)
+                
+                # Process frame in background thread
+                landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
+                
+                # Record if active
+                if st.session_state.is_recording:
+                    st.session_state.recorded_sequence.append(landmarks)
+                
+                # Update frame counter
+                st.session_state.frame_count += 1
+                
+                try:
+                    # Display frame
+                    camera_placeholder.image(
+                        annotated_frame,
+                        channels="BGR",
+                        use_container_width=True,
+                        caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
+                    )
+                except Exception as display_error:
+                    st.error(f"Display error: {str(display_error)}")
+                    continue
+
+                # Small delay to prevent CPU overload
+                time.sleep(0.01)  # 10ms delay
+
+                # Lightweight UI update
+                if st.session_state.frame_count % 10 == 0:
+                    st.empty()
                     
         except Exception as e:
             st.error(f"Camera error: {str(e)}")
