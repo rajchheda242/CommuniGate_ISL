@@ -14,38 +14,13 @@ import numpy as np
 import joblib
 import json
 import os
+import queue
+import threading
 from PIL import Image
 import time
 from tensorflow.keras.models import load_model
 from datetime import datetime
 import mediapipe as mp
-import threading
-
-# Streamlit compatibility helpers
-def _get_cache_resource():
-    """Return a caching decorator compatible with the installed Streamlit version."""
-    if hasattr(st, "cache_resource"):
-        return st.cache_resource
-    if hasattr(st, "experimental_singleton"):
-        return st.experimental_singleton
-    # Fallback: identity decorator that accepts optional kwargs
-    def _identity_decorator(func=None, **kwargs):
-        if func is None:
-            def _wrap(f):
-                return f
-            return _wrap
-        return func
-    return _identity_decorator
-
-CACHE_RESOURCE = _get_cache_resource()
-
-
-def _safe_rerun():
-    """Rerun script using available Streamlit API without breaking on versions."""
-    if hasattr(st, "rerun"):
-        st.rerun()
-    elif hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
 
 # Try to import text-to-speech (optional)
 try:
@@ -61,45 +36,6 @@ FEATURES_PER_FRAME = 126  # 2 hands × 21 landmarks × 3 coords
 MIN_DETECTION_CONFIDENCE = 0.5
 MIN_TRACKING_CONFIDENCE = 0.5
 
-# Cached resource loader (moved near top so it's defined before first use)
-@CACHE_RESOURCE(show_spinner=True)
-def load_resources_cached():
-    """Return (model, scaler, phrase_mapping) with version-independent caching.
-
-    Placed before class definitions so __init__ can call it safely.
-    """
-    model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
-    if not os.path.exists(model_path):
-        model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
-
-    scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
-    mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
-
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-    if not os.path.exists(scaler_path):
-        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
-    if not os.path.exists(mapping_path):
-        raise FileNotFoundError(f"Phrase mapping not found: {mapping_path}")
-
-    try:
-        model = load_model(model_path, compile=False, safe_mode=False)
-    except (ValueError, OSError) as e:
-        error_msg = str(e)
-        if "expected" in error_msg.lower() and "variables" in error_msg.lower():
-            raise RuntimeError("Model compatibility error: " + error_msg)
-        raise
-
-    try:
-        scaler = joblib.load(scaler_path)
-        with open(mapping_path, 'r') as f:
-            phrase_to_id = json.load(f)
-        phrase_mapping = {v: k for k, v in phrase_to_id.items()}
-    except Exception as e:
-        raise RuntimeError(f"Error loading scaler/mapping: {e}")
-
-    return model, scaler, phrase_mapping
-
 
 class HandLandmarkExtractor:
     """Extract hand landmarks using MediaPipe"""
@@ -108,12 +44,21 @@ class HandLandmarkExtractor:
         self.mp_hands = mp.solutions.hands
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
+        # Create hands object in thread-safe way
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=2,
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE
         )
+        # Initialize frame processing queue
+        self.frame_queue = queue.Queue(maxsize=2)  # Only keep latest 2 frames
+        self.result_queue = queue.Queue(maxsize=2)
+        self.is_running = True
+        # Start processing thread
+        self.process_thread = threading.Thread(target=self._process_frames_thread)
+        self.process_thread.daemon = True
+        self.process_thread.start()
     
     def extract_landmarks(self, hand_landmarks):
         """Extract landmark coordinates from Mediapipe results."""
@@ -122,11 +67,18 @@ class HandLandmarkExtractor:
             landmarks.extend([landmark.x, landmark.y, landmark.z])
         return landmarks
     
-    def process_frame(self, frame):
-        """
-        Process a frame and extract hand landmarks
-        Returns: (landmarks_array, annotated_frame, hands_detected)
-        """
+    def _process_frames_thread(self):
+        """Background thread for processing frames"""
+        while self.is_running:
+            try:
+                frame = self.frame_queue.get(timeout=0.1)
+                result = self._process_single_frame(frame)
+                self.result_queue.put(result)
+            except queue.Empty:
+                continue
+
+    def _process_single_frame(self, frame):
+        """Process a single frame and return results"""
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
         
@@ -137,10 +89,10 @@ class HandLandmarkExtractor:
         if results.multi_hand_landmarks:
             hands_detected = True
             for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                if idx < 2:  # Only process first 2 hands
+                if idx < 2:
                     landmarks = self.extract_landmarks(hand_landmarks)
-                    start_idx = idx * 63
-                    frame_landmarks[start_idx:start_idx + 63] = landmarks
+                    start_idx = idx * len(landmarks)
+                    frame_landmarks[start_idx:start_idx + len(landmarks)] = landmarks
                 
                 # Draw landmarks for visual feedback
                 self.mp_drawing.draw_landmarks(
@@ -152,6 +104,26 @@ class HandLandmarkExtractor:
                 )
         
         return frame_landmarks, frame, hands_detected
+
+    def process_frame(self, frame):
+        """
+        Process a frame and extract hand landmarks
+        Returns: (landmarks_array, annotated_frame, hands_detected)
+        """
+        # Add frame to queue for processing
+        try:
+            self.frame_queue.put_nowait(frame.copy())
+        except queue.Full:
+            # Queue full, skip this frame
+            pass
+            
+        # Get latest processed result
+        try:
+            result = self.result_queue.get_nowait()
+            return result
+        except queue.Empty:
+            # No result yet, return empty frame
+            return np.zeros(FEATURES_PER_FRAME), frame, False
 
 
 class ISLRecognitionApp:
@@ -186,34 +158,87 @@ class ISLRecognitionApp:
             st.session_state.last_confidence = 0.0
         if 'prediction_history' not in st.session_state:
             st.session_state.prediction_history = []
-        if 'latest_frame' not in st.session_state:
-            st.session_state.latest_frame = None
-        if 'hands_detected' not in st.session_state:
-            st.session_state.hands_detected = False
-        if 'video_processor' not in st.session_state:
-            st.session_state.video_processor = None
-        if 'enable_tts' not in st.session_state:
-            st.session_state.enable_tts = TTS_AVAILABLE
-        if 'preview_enabled' not in st.session_state:
-            st.session_state.preview_enabled = True
-        if 'last_frame_time' not in st.session_state:
-            st.session_state.last_frame_time = 0.0
-    
-    
+        if 'camera' not in st.session_state:
+            st.session_state.camera = None
+        if 'frame_count' not in st.session_state:
+            st.session_state.frame_count = 0
 
+    def initialize_camera(self):
+        """Initialize camera capture"""
+        if not st.session_state.camera:
+            cap = cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            if cap.isOpened():
+                st.session_state.camera = cap
+            else:
+                st.error("Failed to initialize camera")
+                return None
+        return st.session_state.camera
+    
     def load_model_and_scaler(self):
-        """Load the trained model, scaler, and phrase mapping (cached)."""
-        try:
-            self.model, self.scaler, self.phrase_mapping = load_resources_cached()
-            st.success("✅ Model, scaler, and phrase mapping loaded (cached)")
-            st.info(f"Sequence Length: {SEQUENCE_LENGTH} • Features/Frame: {FEATURES_PER_FRAME}")
-        except FileNotFoundError as e:
-            st.error(f"❌ {e}")
+        """Load the trained model, scaler, and phrase mapping"""
+        model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
+        
+        scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
+        mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
+        
+        # Check if files exist
+        if not os.path.exists(model_path):
+            st.error(f"❌ Model file not found: {model_path}")
             st.info("Please retrain the model: python src/training/train_sequence_model.py")
-        except RuntimeError as e:
-            st.error(str(e))
+            return
+        
+        if not os.path.exists(scaler_path):
+            st.error(f"❌ Scaler file not found: {scaler_path}")
+            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            return
+        
+        if not os.path.exists(mapping_path):
+            st.error(f"❌ Phrase mapping not found: {mapping_path}")
+            st.info("Please retrain the model: python src/training/train_sequence_model.py")
+            return
+        
+        try:
+            # Load model with compatibility settings
+            self.model = load_model(model_path, compile=False, safe_mode=False)
+            self.model.compile(
+                optimizer='adam',
+                loss='sparse_categorical_crossentropy',
+                metrics=['accuracy']
+            )
+            st.success(f"✅ Model loaded successfully from {model_path}")
+            
+        except (ValueError, OSError) as e:
+            error_msg = str(e)
+            if "expected" in error_msg.lower() and "variables" in error_msg.lower():
+                st.error("❌ Model compatibility error!")
+                st.error(f"Details: {error_msg}")
+                st.warning("The model was trained on a different system. Please retrain on THIS computer:")
+                st.code("python src/training/train_sequence_model.py")
+                return
+            else:
+                st.error(f"❌ Error loading model: {error_msg}")
+                raise
+        
+        try:
+            # Load scaler
+            self.scaler = joblib.load(scaler_path)
+            st.success(f"✅ Scaler loaded successfully")
+            
+            # Load phrase mapping and invert it (file has phrase->id, we need id->phrase)
+            with open(mapping_path, 'r') as f:
+                phrase_to_id = json.load(f)
+                # Invert the mapping: id -> phrase
+                self.phrase_mapping = {v: k for k, v in phrase_to_id.items()}
+            st.success(f"✅ Phrase mapping loaded: {len(self.phrase_mapping)} phrases")
+                
         except Exception as e:
-            st.error(f"❌ Unexpected error while loading resources: {e}")
+            st.error(f"❌ Error loading scaler/mapping: {e}")
+            raise
     
     def init_tts(self):
         """Initialize text-to-speech engine"""
@@ -225,7 +250,7 @@ class ISLRecognitionApp:
     
     def speak(self, text):
         """Speak the predicted phrase"""
-        if self.tts_engine and TTS_AVAILABLE and st.session_state.get('enable_tts', False):
+        if self.tts_engine and TTS_AVAILABLE:
             try:
                 self.tts_engine.say(text)
                 self.tts_engine.runAndWait()
@@ -336,18 +361,25 @@ class ISLRecognitionApp:
                 # Speak the prediction
                 if TTS_AVAILABLE:
                     self.speak(phrase)
-
+    
     def run(self):
-        """Render the Streamlit UI (non-blocking; camera runs in background thread)."""
+        """Run the Streamlit application"""
+        # Initialize camera at startup
+        cap = self.initialize_camera()
+        if not cap:
+            st.error("Camera not available")
+            return
+
         st.set_page_config(
             page_title="ISL Recognition",
             page_icon="🤟",
-            layout="wide"
+            layout="wide",
+            initial_sidebar_state="expanded"
         )
-
+        
         st.title("🤟 Indian Sign Language Recognition")
         st.markdown("### Enhanced Model - Manual Recording Control")
-
+        
         # Sidebar
         with st.sidebar:
             st.header("ℹ️ Instructions")
@@ -371,88 +403,70 @@ class ISLRecognitionApp:
             - Good lighting helps accuracy
             - Plain background is best
             """)
-
+            
             st.markdown("---")
-
+            
             # Settings
             st.header("⚙️ Settings")
-            st.session_state.enable_tts = st.checkbox(
-                "Enable Text-to-Speech", value=st.session_state.get("enable_tts", TTS_AVAILABLE)
-            )
+            enable_tts = st.checkbox("Enable Text-to-Speech", value=TTS_AVAILABLE)
             show_debug = st.checkbox("Show Debug Info", value=False)
-
+            
             st.markdown("---")
-
+            
             # Model info
             st.header("📊 Model Info")
             if self.model:
                 st.success("✅ Model Loaded")
                 st.info(f"Sequence Length: {SEQUENCE_LENGTH} frames")
                 st.info(f"Features: {FEATURES_PER_FRAME} per frame")
-
-        # Main content
+        
+        # Main content - two columns
         col1, col2 = st.columns([2, 1])
-
+        
         with col1:
             st.subheader("📹 Camera Feed")
+            
+            # Camera placeholder
             camera_placeholder = st.empty()
-
-            # Start video processor if not already running
-            if st.session_state.video_processor is None:
-                st.session_state.video_processor = VideoProcessor(self.extractor)
-                st.session_state.video_processor.start()
-
-            # Controls
-            b1, b2, b3 = st.columns(3)
-            with b1:
-                if st.button("🎬 Start Recording", disabled=st.session_state.is_recording):
+            
+            # Control buttons
+            button_col1, button_col2, button_col3 = st.columns(3)
+            
+            with button_col1:
+                if st.button("🎬 Start Recording", type="primary", disabled=st.session_state.is_recording):
                     self.start_recording()
-            with b2:
-                if st.button("⏹️ Stop & Predict", disabled=not st.session_state.is_recording):
+                    st.rerun()
+            
+            with button_col2:
+                if st.button("⏹️ Stop & Predict", type="secondary", disabled=not st.session_state.is_recording):
                     self.stop_recording()
-            with b3:
+                    st.rerun()
+            
+            with button_col3:
                 if st.button("🔄 Clear History"):
                     st.session_state.prediction_history = []
                     st.session_state.last_prediction = None
-
-            # Preview controls (main area so it's visible)
-            pc1, pc2 = st.columns([1, 2])
-            with pc1:
-                st.session_state.preview_enabled = st.checkbox("Live Preview", value=st.session_state.preview_enabled)
-            with pc2:
-                fps = st.slider("Preview FPS", min_value=5, max_value=30, value=15, help="Affects CPU usage")
-
-            # Status
+                    st.rerun()
+            
+            # Recording status
             if st.session_state.is_recording:
                 frames_recorded = len(st.session_state.recorded_sequence)
                 cleaned_frames = len(self.remove_blank_frames(st.session_state.recorded_sequence))
-                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} valid)")
-                st.progress(min(frames_recorded / 150, 1.0))
+                
+                st.error(f"🔴 **RECORDING** - {frames_recorded} frames ({cleaned_frames} with hands detected)")
+                st.progress(min(frames_recorded / 150, 1.0))  # Show progress up to 150 frames
             else:
                 st.info("⚪ Ready - Click 'Start Recording' to begin")
-
-            # Display current frame with optional continuous preview
-            frame = st.session_state.get('latest_frame')
-            if st.session_state.preview_enabled:
-                # bounded loop + rerun to create continuous preview
-                sleep_s = 1.0 / max(5, min(30, fps))
-                for _ in range(int(1.5 / sleep_s)):  # about 1.5s of updates
-                    f = st.session_state.get('latest_frame')
-                    if f is not None:
-                        camera_placeholder.image(f, channels="RGB", use_container_width=True)
-                    time.sleep(sleep_s)
-                _safe_rerun()
-            else:
-                if frame is not None:
-                    camera_placeholder.image(frame, channels="RGB", use_container_width=True)
-                else:
-                    st.warning("Waiting for camera...")
-
+        
         with col2:
             st.subheader("🎯 Prediction")
+            
+            # Current prediction
             if st.session_state.last_prediction:
                 st.success(f"**Phrase:** {st.session_state.last_prediction}")
                 st.metric("Confidence", f"{st.session_state.last_confidence:.1f}%")
+                
+                # Confidence indicator
                 if st.session_state.last_confidence >= 90:
                     st.success("🎉 Excellent confidence!")
                 elif st.session_state.last_confidence >= 70:
@@ -461,127 +475,58 @@ class ISLRecognitionApp:
                     st.warning("⚠️ Low confidence - try again")
             else:
                 st.info("No prediction yet")
-
+            
+            # Prediction history
             if st.session_state.prediction_history:
                 st.markdown("---")
                 st.subheader("📜 Recent Predictions")
+                
                 for i, pred in enumerate(reversed(st.session_state.prediction_history[-5:])):
-                    with st.expander(f"{pred['timestamp']} - {pred['phrase']}", expanded=(i == 0)):
+                    with st.expander(f"{pred['timestamp']} - {pred['phrase']}", expanded=(i==0)):
                         st.write(f"**Phrase:** {pred['phrase']}")
                         st.write(f"**Confidence:** {pred['confidence']:.1f}%")
                         st.write(f"**Total Frames:** {pred['frames']}")
                         st.write(f"**Valid Frames:** {pred['cleaned_frames']}")
-
-        # Optional debug section
-        if show_debug:
-            st.markdown("---")
-            st.subheader("🛠 Debug Info")
-            st.write({
-                'recording': st.session_state.is_recording,
-                'frames_collected': len(st.session_state.recorded_sequence),
-                'latest_frame_available': st.session_state.latest_frame is not None,
-                'hands_detected': st.session_state.hands_detected,
-            })
-
-
-class VideoProcessor:
-    """Background video capture and processing to keep camera alive across reruns."""
-
-    def __init__(self, extractor: HandLandmarkExtractor, cam_index: int = 0):
-        self.extractor = extractor
-        self.cam_index = cam_index
-        self.cap = None
-        self.running = False
-        self.thread = None
-
-    def start(self):
-        if self.running:
-            return
-        # Initialize camera once
-        self.cap = cv2.VideoCapture(self.cam_index)
-        # Performance-friendly settings
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
-        self.running = True
-        self.thread = threading.Thread(target=self._loop, daemon=True)
-        self.thread.start()
-
-    def _loop(self):
-        frame_counter = 0
-        while self.running:
-            ret, frame = self.cap.read()
-            if not ret:
-                time.sleep(0.05)
-                continue
-
-            frame = cv2.flip(frame, 1)
-
-            # Process with MediaPipe hands
-            landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
-
-            # If recording, accumulate landmarks
-            if st.session_state.get('is_recording', False):
-                st.session_state.recorded_sequence.append(landmarks)
-                # Recording indicator
-                cv2.circle(annotated_frame, (30, 30), 15, (0, 0, 255), -1)
-                cv2.putText(
+        
+                # Camera feed with optimized frame processing
+        try:
+            while True:
+                ret, frame = st.session_state.camera.read()
+                if not ret:
+                    st.error("Failed to get frame from camera")
+                    time.sleep(0.1)
+                    continue
+                
+                frame = cv2.flip(frame, 1)
+                
+                # Process frame in background thread
+                landmarks, annotated_frame, hands_detected = self.extractor.process_frame(frame)
+                
+                # Record if active
+                if st.session_state.is_recording:
+                    st.session_state.recorded_sequence.append(landmarks)
+                
+                # Update frame counter and rerun if needed
+                st.session_state.frame_count += 1
+                if st.session_state.frame_count % 30 == 0:  # Force update every 30 frames
+                    st.experimental_rerun()
+                
+                # Display frame
+                camera_placeholder.image(
                     annotated_frame,
-                    "REC",
-                    (60, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 0, 255),
-                    2,
-                )
-                cv2.putText(
-                    annotated_frame,
-                    f"Frames: {len(st.session_state.recorded_sequence)}",
-                    (60, 70),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 255, 255),
-                    2,
+                    channels="BGR",
+                    use_column_width=True,
+                    caption="Live Feed - Recording..." if st.session_state.is_recording else "Live Feed"
                 )
 
-            # Hands detected label
-            if hands_detected:
-                cv2.putText(
-                    annotated_frame,
-                    "Hands: Detected",
-                    (10, annotated_frame.shape[0] - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
-            else:
-                cv2.putText(
-                    annotated_frame,
-                    "Hands: Not Detected",
-                    (10, annotated_frame.shape[0] - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 0, 255),
-                    2,
-                )
-
-            # Update latest frame in session state (RGB for Streamlit)
-            st.session_state.latest_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-            st.session_state.hands_detected = hands_detected
-            st.session_state.last_frame_time = time.time()
-
-            # Throttle to ~15-20 FPS display/update
-            frame_counter += 1
-            time.sleep(0.03)
-
-    def stop(self):
-        self.running = False
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=1)
-        if self.cap:
-            self.cap.release()
-    
+                # Small delay to prevent overloading
+                time.sleep(0.01)  # 10ms delay between frames
+        except Exception as e:
+            st.error(f"Camera error: {str(e)}")
+            time.sleep(0.1)
+        finally:
+            if st.session_state.camera:
+                st.session_state.camera.release()
 
 
 if __name__ == "__main__":
