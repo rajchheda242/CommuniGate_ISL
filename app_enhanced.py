@@ -61,6 +61,45 @@ FEATURES_PER_FRAME = 126  # 2 hands × 21 landmarks × 3 coords
 MIN_DETECTION_CONFIDENCE = 0.5
 MIN_TRACKING_CONFIDENCE = 0.5
 
+# Cached resource loader (moved near top so it's defined before first use)
+@CACHE_RESOURCE(show_spinner=True)
+def load_resources_cached():
+    """Return (model, scaler, phrase_mapping) with version-independent caching.
+
+    Placed before class definitions so __init__ can call it safely.
+    """
+    model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
+    if not os.path.exists(model_path):
+        model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
+
+    scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
+    mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
+    if not os.path.exists(mapping_path):
+        raise FileNotFoundError(f"Phrase mapping not found: {mapping_path}")
+
+    try:
+        model = load_model(model_path, compile=False, safe_mode=False)
+    except (ValueError, OSError) as e:
+        error_msg = str(e)
+        if "expected" in error_msg.lower() and "variables" in error_msg.lower():
+            raise RuntimeError("Model compatibility error: " + error_msg)
+        raise
+
+    try:
+        scaler = joblib.load(scaler_path)
+        with open(mapping_path, 'r') as f:
+            phrase_to_id = json.load(f)
+        phrase_mapping = {v: k for k, v in phrase_to_id.items()}
+    except Exception as e:
+        raise RuntimeError(f"Error loading scaler/mapping: {e}")
+
+    return model, scaler, phrase_mapping
+
 
 class HandLandmarkExtractor:
     """Extract hand landmarks using MediaPipe"""
@@ -384,13 +423,13 @@ class ISLRecognitionApp:
 
             # Display current frame (with optional short refresh loop)
             if auto_refresh:
-                for _ in range(40):  # ~1.2s of updates
+                for _ in range(30):  # ~0.9s of updates to lower CPU load
                     frame = st.session_state.get('latest_frame')
                     if frame is not None:
                         camera_placeholder.image(frame, channels="RGB", use_container_width=True)
                     time.sleep(0.03)
-                # Trigger a lightweight rerun to keep frames updating without restarting camera
-                st.experimental_rerun()
+                # Safe rerun using compatibility helper (avoids AttributeError)
+                _safe_rerun()
             else:
                 frame = st.session_state.get('latest_frame')
                 if frame is not None:
@@ -536,40 +575,3 @@ class VideoProcessor:
 if __name__ == "__main__":
     app = ISLRecognitionApp()
     app.run()
-
-
-# Cached resource loader (module level so decorator applies once)
-@CACHE_RESOURCE(show_spinner=True)
-def load_resources_cached():
-    """Return (model, scaler, phrase_mapping) with version-independent caching."""
-    model_path = os.path.join(MODEL_DIR, "lstm_model_enhanced.keras")
-    if not os.path.exists(model_path):
-        model_path = os.path.join(MODEL_DIR, "lstm_model.keras")
-
-    scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
-    mapping_path = os.path.join(MODEL_DIR, "phrase_mapping.json")
-
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-    if not os.path.exists(scaler_path):
-        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
-    if not os.path.exists(mapping_path):
-        raise FileNotFoundError(f"Phrase mapping not found: {mapping_path}")
-
-    try:
-        model = load_model(model_path, compile=False, safe_mode=False)
-    except (ValueError, OSError) as e:
-        error_msg = str(e)
-        if "expected" in error_msg.lower() and "variables" in error_msg.lower():
-            raise RuntimeError("Model compatibility error: " + error_msg)
-        raise
-
-    try:
-        scaler = joblib.load(scaler_path)
-        with open(mapping_path, 'r') as f:
-            phrase_to_id = json.load(f)
-        phrase_mapping = {v: k for k, v in phrase_to_id.items()}
-    except Exception as e:
-        raise RuntimeError(f"Error loading scaler/mapping: {e}")
-
-    return model, scaler, phrase_mapping
