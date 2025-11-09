@@ -7,9 +7,11 @@ pandas>=2.0.0
 joblib>=1.3.0
 
 # Deep Learning (for sequence recognition)
-# Use tensorflow-cpu for better Windows compatibility
-# If you get DLL errors on Windows, use this instead of regular tensorflow
-tensorflow-cpu==2.15.0  # CPU-only version, more compatible on Windows
+# Apple Silicon (M1/M2/M3) optimized packages - preferred for macOS
+# Use `tensorflow-macos` + `tensorflow-metal` on Apple Silicon for GPU acceleration.
+# If you need cross-platform CPU-only wheel on Windows, switch back to `tensorflow-cpu`.
+tensorflow-macos>=2.15.0
+tensorflow-metal>=0.8.0
 protobuf<4.0.0,>=3.20.0  # Ensure compatibility with mediapipe
 
 # UI Framework
